@@ -6,7 +6,7 @@ struct HealthCheckResponse {
     status: String,
 }
 
-pub fn health_check_router() -> Router {
+pub fn router() -> Router {
     Router::new().route("/", get(health_check))
 }
 
