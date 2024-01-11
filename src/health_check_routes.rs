@@ -1,12 +1,14 @@
 use axum::{routing::get, Json, Router};
 use serde::Serialize;
 
+use crate::AppState;
+
 #[derive(Serialize)]
 struct HealthCheckResponse {
     status: String,
 }
 
-pub fn router() -> Router {
+pub fn router() -> Router<AppState> {
     Router::new().route("/", get(health_check))
 }
 
