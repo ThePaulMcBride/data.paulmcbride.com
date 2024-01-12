@@ -2,7 +2,7 @@ use axum::{extract::Path, extract::State, http::StatusCode, routing::get, Json, 
 use serde::Serialize;
 
 use crate::{
-    posts::{Post, PostSummary},
+    data::posts::{Post, PostSummary},
     AppState,
 };
 
