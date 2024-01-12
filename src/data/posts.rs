@@ -1,93 +1,102 @@
+use std::fs;
+
+use gray_matter::{engine::YAML, Matter};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Post {
+pub struct PostFrontMatter {
     pub date: String,
     pub title: String,
     pub description: String,
     pub banner: String,
     pub tags: Option<Vec<String>>,
     pub draft: Option<bool>,
-    pub slug: String,
-    pub body: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-
 pub struct PostSummary {
-    pub date: String,
-    pub title: String,
-    pub description: String,
-    pub banner: String,
-    pub tags: Option<Vec<String>>,
-    pub draft: Option<bool>,
+    #[serde(flatten)]
+    pub front_matter: PostFrontMatter,
     pub slug: String,
 }
 
-// implement into for Post to PostSummary
-impl From<Post> for PostSummary {
-    fn from(post: Post) -> Self {
-        Self {
-            date: post.date,
-            title: post.title,
-            description: post.description,
-            banner: post.banner,
-            tags: post.tags,
-            draft: post.draft,
-            slug: post.slug,
-        }
-    }
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Post {
+    #[serde(flatten)]
+    pub front_matter: PostFrontMatter,
+    pub slug: String,
+    pub body: String,
 }
 
 #[derive(Clone)]
 pub struct PostService {
     posts: Vec<Post>,
 }
+// implement into for Post to PostSummary
+impl From<Post> for PostSummary {
+    fn from(post: Post) -> Self {
+        PostSummary {
+            front_matter: post.front_matter,
+            slug: post.slug,
+        }
+    }
+}
 
-// load posts from markdown files in content/posts
 impl PostService {
     pub fn load_from_disk() -> Self {
-        let posts = vec![
-            Post {
-                date: "2021-01-01".to_string(),
-                title: "Hello, world!".to_string(),
-                description: "This is a test post".to_string(),
-                banner: "https://source.unsplash.com/random".to_string(),
-                tags: Some(vec!["test".to_string()]),
-                draft: Some(false),
-                slug: "hello-world".to_string(),
-                body: "This is a test post".to_string(),
-            },
-            Post {
-                date: "2021-01-02".to_string(),
-                title: "Hello, world!".to_string(),
-                description: "This is a test post".to_string(),
-                banner: "https://source.unsplash.com/random".to_string(),
-                tags: Some(vec!["test".to_string()]),
-                draft: Some(false),
-                slug: "hello-world-2".to_string(),
-                body: "This is a test post".to_string(),
-            },
-            Post {
-                date: "2021-01-03".to_string(),
-                title: "Hello, world!".to_string(),
-                description: "This is a test post".to_string(),
-                banner: "https://source.unsplash.com/random".to_string(),
-                tags: Some(vec!["test".to_string()]),
-                draft: Some(false),
-                slug: "hello-world-3".to_string(),
-                body: "This is a test post".to_string(),
-            },
-        ];
+        let matter = Matter::<YAML>::new();
+        let posts_dir = "./content/posts";
+
+        let posts = fs::read_dir(posts_dir)
+            .expect("Unable to read posts directory")
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .path()
+                    .extension()
+                    .map_or(false, |ext| ext == "mdx" || ext == "md")
+            })
+            .map(|file| {
+                let path = file.path();
+                let content_string = fs::read_to_string(&path)
+                    .map_err(|err| format!("Unable to read {}: {}", path.display(), err));
+                let content = content_string.as_deref().unwrap_or_default();
+                let result = matter.parse(content);
+                let front_matter_data = result.data.expect(&format!(
+                    "Unable to get front matter from {}",
+                    path.display()
+                ));
+                let front_matter =
+                    front_matter_data
+                        .deserialize::<PostFrontMatter>()
+                        .expect(&format!(
+                            "Unable to deserialize front matter from {}",
+                            path.display()
+                        ));
+                let post_slug = path.file_stem().unwrap().to_string_lossy().to_string();
+                let slug = format!("/{}", post_slug);
+                let body = result.content;
+                Post {
+                    front_matter,
+                    slug,
+                    body,
+                }
+            })
+            .collect();
 
         Self { posts }
     }
 
     pub fn get_posts(&self) -> Vec<PostSummary> {
-        self.posts.iter().map(|post| post.clone().into()).collect()
+        self.posts
+            .iter()
+            .filter(|post| post.front_matter.draft != Some(true))
+            .map(|post| post.clone().into())
+            .collect()
     }
 
     pub fn get_post(&self, slug: &str) -> Option<Post> {
+        let slug = format!("/{}", slug);
         self.posts
             .iter()
             .find(|post| post.slug == slug)
