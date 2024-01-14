@@ -2,15 +2,16 @@
 date: "2018-03-04"
 title: "Up and Running with Webpack 4"
 description: "Webpack 4 has finally been released and it is pretty great! If you are looking for zero config JavaScript bundling, then Webpack 4 is the tool for you!"
-banner: "../../public/images/webpack-4.jpg"
-tags: ["tools"]
+banner: "/images/webpack-4.jpg"
+tags:
+  - tools
 ---
 
-After much anticipation, Webpack 4 has finally been released and it is pretty great! If you are looking for zero config JavaScript bundling, then Webpack 4 is the tool for you. In this article, we’ll talk about the changes made from version 3 and how to get up and running with Webpack 4.
+After much anticipation, Webpack 4 has finally been released and it is pretty great! If you are looking for zero config JavaScript bundling, then Webpack 4 is the tool for you. In this article, we'll talk about the changes made from version 3 and how to get up and running with Webpack 4.
 
-Before we dive too deeply into what’s new in Webpack 4, let’s quickly recap what Webpack actually is. Webpack is a module bundler. It takes care of care of compiling and transpiring code and assets into production-ready bundles. This includes transpiling JavaScript that uses modern ESNext features into a bundle that works in today’s browsers. Webpack can bundle basically anything if you use the correct loader.
+Before we dive too deeply into what's new in Webpack 4, let's quickly recap what Webpack actually is. Webpack is a module bundler. It takes care of care of compiling and transpiring code and assets into production-ready bundles. This includes transpiling JavaScript that uses modern ESNext features into a bundle that works in today's browsers. Webpack can bundle basically anything if you use the correct loader.
 
-## What’s new in Webpack 4
+## What's new in Webpack 4
 
 So what has actually changed?
 
@@ -36,7 +37,7 @@ One of the most exciting changes in Webpack 4 is that it can now be used without
 
 ## Getting started
 
-Now that we know what has changed, let’s look at how we could use Webpack in a new project. By default, it will look for `./src/index.js` as the entry point. Webpack will then bundle it up and emit it to `./dist/main.js`. So, if you have an `index.js` in your `src` folder, all you need to do after installing Webpack is run `webpack –mode development` for development mode or `webpack –mode production` for production mode.
+Now that we know what has changed, let's look at how we could use Webpack in a new project. By default, it will look for `./src/index.js` as the entry point. Webpack will then bundle it up and emit it to `./dist/main.js`. So, if you have an `index.js` in your `src` folder, all you need to do after installing Webpack is run `webpack -mode development` for development mode or `webpack -mode production` for production mode.
 
 Simple, right? Obviously, there is a lot more to Webpack. It is super configurable and you can make it do pretty much anything you want. If you want to learn more about how you can configure it, check out the official documentation. https://webpack.js.org/
 
