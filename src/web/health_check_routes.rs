@@ -1,5 +1,7 @@
-use axum::{routing::get, Json, Router};
+use axum::{routing::get, Router};
 use serde::Serialize;
+
+use super::{ApiResponse, ApiSuccess};
 
 #[derive(Serialize)]
 struct HealthCheckResponse {
@@ -10,10 +12,10 @@ pub fn router() -> Router {
     Router::new().route("/", get(health_check))
 }
 
-async fn health_check() -> Json<HealthCheckResponse> {
+async fn health_check() -> ApiResponse<HealthCheckResponse> {
     let response = HealthCheckResponse {
         status: "ok".to_string(),
     };
 
-    Json(response)
+    ApiResponse::Ok(ApiSuccess::JsonData(response))
 }
