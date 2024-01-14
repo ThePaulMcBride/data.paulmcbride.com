@@ -1,9 +1,8 @@
 use axum::{extract::Path, routing::get, Router};
 use serde::Serialize;
 
+use super::ApiResponse;
 use crate::data::posts::{Post, PostService, PostSummary};
-
-use super::{ApiError, ApiResponse, ApiSuccess};
 
 pub fn router() -> Router {
     Router::new()
@@ -19,14 +18,14 @@ struct PostsResponse {
 async fn list_posts() -> ApiResponse<PostsResponse> {
     let posts: Vec<PostSummary> = PostService::get_posts();
 
-    ApiResponse::Ok(ApiSuccess::JsonData(PostsResponse { posts }))
+    ApiResponse::JsonData(PostsResponse { posts })
 }
 
 async fn get_post(Path(slug): Path<String>) -> ApiResponse<Post> {
     let post_option = PostService::get_post(&slug);
 
     match post_option {
-        Some(post) => ApiResponse::Ok(ApiSuccess::JsonData(post)),
-        None => ApiResponse::Err(ApiError::NotFound),
+        Some(post) => ApiResponse::JsonData(post),
+        None => ApiResponse::NotFound,
     }
 }

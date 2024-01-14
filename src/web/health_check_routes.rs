@@ -1,7 +1,7 @@
 use axum::{routing::get, Router};
 use serde::Serialize;
 
-use super::{ApiResponse, ApiSuccess};
+use super::ApiResponse;
 
 #[derive(Serialize)]
 struct HealthCheckResponse {
@@ -17,5 +17,5 @@ async fn health_check() -> ApiResponse<HealthCheckResponse> {
         status: "ok".to_string(),
     };
 
-    ApiResponse::Ok(ApiSuccess::JsonData(response))
+    ApiResponse::JsonData(response)
 }
