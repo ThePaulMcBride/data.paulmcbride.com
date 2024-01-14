@@ -1,5 +1,6 @@
 use axum::{extract::Path, routing::get, Router};
 use serde::Serialize;
+use tower_http::compression::CompressionLayer;
 
 use super::ApiResponse;
 use crate::data::posts::{Post, PostService, PostSummary};
@@ -8,6 +9,7 @@ pub fn router() -> Router {
     Router::new()
         .route("/", get(list_posts))
         .route("/:slug", get(get_post))
+        .layer(CompressionLayer::new())
 }
 
 #[derive(Debug, Serialize)]

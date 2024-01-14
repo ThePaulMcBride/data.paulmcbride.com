@@ -1,5 +1,6 @@
 use axum::{routing::get, Router};
 use serde::Serialize;
+use tower_http::compression::CompressionLayer;
 
 use super::ApiResponse;
 
@@ -9,7 +10,9 @@ struct HealthCheckResponse {
 }
 
 pub fn router() -> Router {
-    Router::new().route("/", get(health_check))
+    Router::new()
+        .route("/", get(health_check))
+        .layer(CompressionLayer::new())
 }
 
 async fn health_check() -> ApiResponse<HealthCheckResponse> {
