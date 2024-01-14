@@ -1,7 +1,7 @@
-use std::fs;
-
 use gray_matter::{engine::YAML, Matter};
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
+use std::fs;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PostFrontMatter {
@@ -29,10 +29,8 @@ pub struct Post {
 }
 
 #[derive(Clone)]
-pub struct PostService {
-    posts: Vec<Post>,
-}
-// implement into for Post to PostSummary
+pub struct PostService;
+
 impl From<Post> for PostSummary {
     fn from(post: Post) -> Self {
         PostSummary {
@@ -43,11 +41,11 @@ impl From<Post> for PostSummary {
 }
 
 impl PostService {
-    pub fn load_from_disk() -> Self {
+    fn load_from_disk() -> Vec<Post> {
         let matter = Matter::<YAML>::new();
         let posts_dir = "./content/posts";
 
-        let posts = fs::read_dir(posts_dir)
+        let posts: Vec<Post> = fs::read_dir(posts_dir)
             .expect("Unable to read posts directory")
             .filter_map(|entry| entry.ok())
             .filter(|entry| {
@@ -82,22 +80,23 @@ impl PostService {
                     body,
                 }
             })
+            .sorted_by(|a, b| b.front_matter.date.cmp(&a.front_matter.date))
             .collect();
 
-        Self { posts }
+        posts
     }
 
-    pub fn get_posts(&self) -> Vec<PostSummary> {
-        self.posts
+    pub fn get_posts() -> Vec<PostSummary> {
+        PostService::load_from_disk()
             .iter()
             .filter(|post| post.front_matter.draft != Some(true))
             .map(|post| post.clone().into())
             .collect()
     }
 
-    pub fn get_post(&self, slug: &str) -> Option<Post> {
+    pub fn get_post(slug: &str) -> Option<Post> {
         let slug = format!("/{}", slug);
-        self.posts
+        PostService::load_from_disk()
             .iter()
             .find(|post| post.slug == slug)
             .map(|post| post.clone())
