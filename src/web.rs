@@ -8,6 +8,7 @@ use serde::Serialize;
 use tower_http::services::ServeDir;
 
 mod health_check_routes;
+mod note_routes;
 mod post_routes;
 
 enum ApiResponse<T: Serialize> {
@@ -29,4 +30,5 @@ pub fn bootstrap() -> Router {
         .nest_service("/", ServeDir::new("public"))
         .nest("/health-check", health_check_routes::router())
         .nest("/posts", post_routes::router())
+        .nest("/notes", note_routes::router())
 }
