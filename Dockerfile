@@ -1,15 +1,26 @@
-# 1. This tells docker to use the Rust official image
-FROM rust:1.75.0
+FROM rust:1.85-slim AS builder
 
-# 2. Copy the files in your machine to the Docker image
-COPY content/ content/
-COPY public/ public/
+WORKDIR /app
+
+COPY Cargo.lock Cargo.toml ./
 COPY src/ src/
-COPY Cargo.lock Cargo.lock
-COPY Cargo.toml Cargo.toml
 
-# Build your program for release
-RUN cargo build --release
+RUN cargo build --release --locked
 
-# Run the binary
-CMD ["./target/release/content_paulmcbride_com"]
+FROM debian:bookworm-slim AS runtime
+
+WORKDIR /app
+
+ENV PORT=8000
+
+RUN useradd --uid 10001 --home-dir /app appuser
+
+COPY --from=builder /app/target/release/content_paulmcbride_com /usr/local/bin/content_paulmcbride_com
+COPY --chown=appuser:appuser content/ content/
+COPY --chown=appuser:appuser public/ public/
+
+USER appuser
+
+EXPOSE 8000
+
+CMD ["content_paulmcbride_com"]
