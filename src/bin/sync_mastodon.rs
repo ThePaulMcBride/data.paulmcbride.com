@@ -1,21 +1,56 @@
 use chrono::{DateTime, Utc};
 use eyre::WrapErr;
+use serde::Deserialize;
 use std::{env, fmt, path::PathBuf};
 
-fn main() -> eyre::Result<()> {
+#[tokio::main]
+async fn main() -> eyre::Result<()> {
     dotenvy::dotenv().ok();
 
     let config = MastodonSyncConfig::from_env().wrap_err("failed to read Mastodon sync config")?;
+    let account = fetch_account(&config)
+        .await
+        .wrap_err("failed to verify Mastodon account config")?;
 
     println!(
-        "Mastodon sync configured for account {} on {}. Notes will be written under {}. Access token loaded: {}.",
-        config.account_id,
+        "Mastodon sync configured for @{} ({}) on {}. Notes will be written under {}.",
+        account.acct,
+        account.display_name,
         config.base_url,
-        config.notes_dir().display(),
-        config.has_access_token()
+        config.notes_dir().display()
     );
 
     Ok(())
+}
+
+async fn fetch_account(config: &MastodonSyncConfig) -> Result<MastodonAccount, MastodonApiError> {
+    let url = format!(
+        "{}/api/v1/accounts/{}",
+        config.base_url.trim_end_matches('/'),
+        config.account_id,
+    );
+    let response = reqwest::Client::new()
+        .get(&url)
+        .bearer_auth(&config.access_token)
+        .send()
+        .await
+        .map_err(MastodonApiError::Request)?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(MastodonApiError::UnexpectedStatus { status });
+    }
+
+    response
+        .json::<MastodonAccount>()
+        .await
+        .map_err(MastodonApiError::Decode)
+}
+
+#[derive(Debug, Deserialize)]
+struct MastodonAccount {
+    acct: String,
+    display_name: String,
 }
 
 #[derive(Debug)]
@@ -41,11 +76,28 @@ impl MastodonSyncConfig {
     fn notes_dir(&self) -> PathBuf {
         self.content_dir.join("notes")
     }
+}
 
-    fn has_access_token(&self) -> bool {
-        !self.access_token.is_empty()
+#[derive(Debug)]
+enum MastodonApiError {
+    Request(reqwest::Error),
+    UnexpectedStatus { status: reqwest::StatusCode },
+    Decode(reqwest::Error),
+}
+
+impl fmt::Display for MastodonApiError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Request(source) => write!(f, "Mastodon API request failed: {}", source),
+            Self::UnexpectedStatus { status } => {
+                write!(f, "Mastodon API returned unexpected status: {}", status)
+            }
+            Self::Decode(source) => write!(f, "failed to decode Mastodon API response: {}", source),
+        }
     }
 }
+
+impl std::error::Error for MastodonApiError {}
 
 #[derive(Debug)]
 enum MastodonSyncConfigError {
