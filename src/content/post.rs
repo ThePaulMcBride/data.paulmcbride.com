@@ -7,8 +7,12 @@ use std::{fmt, fs, io, path::PathBuf};
 pub struct PostFrontMatter {
     pub date: String,
     pub title: String,
+    pub subtitle: Option<String>,
     pub description: String,
     pub banner: String,
+    #[serde(rename = "lastUpdated")]
+    pub last_updated: Option<String>,
+    pub status: Option<String>,
     pub tags: Option<Vec<String>>,
     pub draft: Option<bool>,
 }
