@@ -13,7 +13,10 @@ WORKDIR /app
 
 ENV PORT=8000
 
-RUN useradd --uid 10001 --home-dir /app appuser
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --uid 10001 --home-dir /app appuser
 
 COPY --from=builder /app/target/release/content_paulmcbride_com /usr/local/bin/content_paulmcbride_com
 COPY --chown=appuser:appuser content/ content/
@@ -22,5 +25,8 @@ COPY --chown=appuser:appuser public/ public/
 USER appuser
 
 EXPOSE 8000
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl --fail "http://127.0.0.1:${PORT}/health-check" || exit 1
 
 CMD ["content_paulmcbride_com"]

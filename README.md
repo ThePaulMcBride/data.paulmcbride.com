@@ -62,7 +62,7 @@ Draft posts are excluded from the post list endpoint.
 
 ## Endpoints
 
-- `GET /health-check/`
+- `GET /health-check`
 - `GET /posts`
 - `GET /posts/`
 - `GET /posts/:slug`
