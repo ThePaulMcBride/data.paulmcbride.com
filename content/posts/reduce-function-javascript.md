@@ -26,10 +26,7 @@ console.log(total); // 7
 
 ## Reduce - Functional Programming in JavaScript
 
-<Youtube
-  code="iT8qyI3ZOuo"
-  title="## Reduce - Functional Programming in JavaScript"
-/>
+::youtube[Reduce - Functional Programming in JavaScript]{#iT8qyI3ZOuo}
 
 ---
 

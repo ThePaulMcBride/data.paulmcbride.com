@@ -14,10 +14,7 @@ You probably already use pure functions all the time and are unaware of what the
 
 ## Pure Functions - Functional Programming in JavaScript
 
-<Youtube
-  code="Jh_Uzqzz_wM"
-  title="## Pure Functions - Functional Programming in JavaScript"
-/>
+::youtube[Pure Functions - Functional Programming in JavaScript]{#Jh_Uzqzz_wM}
 
 ---
 

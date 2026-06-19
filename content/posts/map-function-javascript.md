@@ -24,10 +24,7 @@ const newArray = array.map((value) => value * 2); // 2, 4, 6
 
 ## The Map function - Functional Programming in JavaScript
 
-<Youtube
-  code="gazsGHcj7AE"
-  title="The Map function - Functional Programming in JavaScript"
-/>
+::youtube[The Map function - Functional Programming in JavaScript]{#gazsGHcj7AE}
 
 ---
 

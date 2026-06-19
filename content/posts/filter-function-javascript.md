@@ -24,10 +24,7 @@ const newArray = array.map((value) => value % 2 == 0); // 2, 4, 6, 8
 
 ## The Filter function - Functional Programming in JavaScript
 
-<Youtube
-  code="65Wifnpdg_U"
-  title="The Filter function - Functional Programming in JavaScript"
-/>
+::youtube[The Filter function - Functional Programming in JavaScript]{#65Wifnpdg_U}
 
 ---
 
