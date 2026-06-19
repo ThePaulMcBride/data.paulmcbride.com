@@ -11,6 +11,9 @@ async fn main() -> eyre::Result<()> {
     let account = fetch_account(&config)
         .await
         .wrap_err("failed to verify Mastodon account config")?;
+    let statuses = fetch_statuses(&config)
+        .await
+        .wrap_err("failed to fetch Mastodon statuses")?;
 
     println!(
         "Mastodon sync configured for @{} ({}) on {}. Notes will be written under {}.",
@@ -19,6 +22,19 @@ async fn main() -> eyre::Result<()> {
         config.base_url,
         config.notes_dir().display()
     );
+    println!("Fetched {} recent statuses:", statuses.len());
+
+    for status in statuses {
+        println!(
+            "- {} | {} | {} | visibility={} | content={} chars | media={}",
+            status.id,
+            status.created_at,
+            status.url.as_deref().unwrap_or("no public url"),
+            status.visibility,
+            status.content.len(),
+            status.media_attachments.len()
+        );
+    }
 
     Ok(())
 }
@@ -47,11 +63,51 @@ async fn fetch_account(config: &MastodonSyncConfig) -> Result<MastodonAccount, M
         .map_err(MastodonApiError::Decode)
 }
 
+async fn fetch_statuses(
+    config: &MastodonSyncConfig,
+) -> Result<Vec<MastodonStatus>, MastodonApiError> {
+    let url = format!(
+        "{}/api/v1/accounts/{}/statuses",
+        config.base_url.trim_end_matches('/'),
+        config.account_id,
+    );
+    let response = reqwest::Client::new()
+        .get(&url)
+        .bearer_auth(&config.access_token)
+        .query(&[("limit", "5"), ("exclude_reblogs", "true")])
+        .send()
+        .await
+        .map_err(MastodonApiError::Request)?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(MastodonApiError::UnexpectedStatus { status });
+    }
+
+    response
+        .json::<Vec<MastodonStatus>>()
+        .await
+        .map_err(MastodonApiError::Decode)
+}
+
 #[derive(Debug, Deserialize)]
 struct MastodonAccount {
     acct: String,
     display_name: String,
 }
+
+#[derive(Debug, Deserialize)]
+struct MastodonStatus {
+    id: String,
+    created_at: String,
+    url: Option<String>,
+    visibility: String,
+    content: String,
+    media_attachments: Vec<MastodonMediaAttachment>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MastodonMediaAttachment {}
 
 #[derive(Debug)]
 struct MastodonSyncConfig {
