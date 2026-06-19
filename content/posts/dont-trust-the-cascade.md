@@ -6,7 +6,7 @@ tags: ["tools", "javascript"]
 banner: "/images/dont-trust-the-cascade.jpg"
 ---
 
-<Note note="My opinion on this as softened substantially since 2019. Mostly because there are now good options to opt out of the global nature of css when it makes sense ie. CSS modules and CSS Cascade Layers." />
+> **Note:** My opinion on this as softened substantially since 2019. Mostly because there are now good options to opt out of the global nature of css when it makes sense ie. CSS modules and CSS Cascade Layers.
 
 If you've been on the internet recently, you've probably heard of CSS-in-JS.
 
