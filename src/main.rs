@@ -7,7 +7,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    let config = config::AppConfig::from_env();
+    let config = config::AppConfig::from_env().wrap_err("failed to read app config")?;
     let post_index = content::post::PostIndex::load(&config.content_dir)
         .wrap_err("failed to load posts content")?;
     let bind_addr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, config.port));
