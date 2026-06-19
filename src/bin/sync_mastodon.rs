@@ -3,6 +3,8 @@ use eyre::WrapErr;
 use std::{env, fmt, path::PathBuf};
 
 fn main() -> eyre::Result<()> {
+    dotenvy::dotenv().ok();
+
     let config = MastodonSyncConfig::from_env().wrap_err("failed to read Mastodon sync config")?;
 
     println!(

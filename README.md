@@ -34,6 +34,8 @@ MASTODON_ACCOUNT_ID=123456 \
 cargo run --bin sync_mastodon
 ```
 
+For local development, copy `.env.example` to `.env` and fill in local values. The binaries load `.env` automatically when it exists. `.env` files are ignored by Git.
+
 ## Configuration
 
 The app reads configuration from environment variables.
