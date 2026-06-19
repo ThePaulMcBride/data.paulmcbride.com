@@ -11,12 +11,18 @@ async fn main() -> eyre::Result<()> {
         .wrap_err("failed to load posts content")?;
     let note_index = content::note::NoteIndex::load(&config.content_dir)
         .wrap_err("failed to load notes content")?;
+    let page_index = content::page::PageIndex::load(&config.content_dir)
+        .wrap_err("failed to load pages content")?;
+    let now_index =
+        content::now::NowIndex::load(&config.content_dir).wrap_err("failed to load now content")?;
     let bind_addr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, config.port));
     let app = web::bootstrap(
         config,
         web::AppState {
             post_index,
             note_index,
+            page_index,
+            now_index,
         },
     );
 

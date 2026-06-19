@@ -10,17 +10,21 @@ use tower_http::services::ServeDir;
 
 use crate::{
     config::AppConfig,
-    content::{note::NoteIndex, post::PostIndex},
+    content::{note::NoteIndex, now::NowIndex, page::PageIndex, post::PostIndex},
 };
 
 mod health_check_routes;
 mod note_routes;
+mod now_routes;
+mod page_routes;
 mod post_routes;
 
 #[derive(Clone)]
 pub struct AppState {
     pub post_index: PostIndex,
     pub note_index: NoteIndex,
+    pub page_index: PageIndex,
+    pub now_index: NowIndex,
 }
 
 enum ApiResponse<T: Serialize> {
@@ -44,6 +48,9 @@ pub fn bootstrap(config: AppConfig, state: AppState) -> Router {
         .nest("/posts", post_routes::router())
         .route("/notes/", get(note_routes::list_notes))
         .nest("/notes", note_routes::router())
+        .route("/now/", get(now_routes::list_now_entries))
+        .nest("/now", now_routes::router())
+        .nest("/pages", page_routes::router())
         .fallback_service(ServeDir::new(config.public_dir))
         .with_state(state)
 }
@@ -100,6 +107,20 @@ mod tests {
         .expect("test note can be written");
     }
 
+    fn write_page(root: &Path, name: &str, body: &str) {
+        create_dir_all(root.join("content/pages")).expect("test pages dir can be created");
+        write(root.join("content/pages").join(name), body).expect("test page can be written");
+    }
+
+    fn write_now(root: &Path, name: &str, front_matter: &str, body: &str) {
+        create_dir_all(root.join("content/now")).expect("test now dir can be created");
+        write(
+            root.join("content/now").join(name),
+            format!("---\n{}---\n\n{}", front_matter, body),
+        )
+        .expect("test now entry can be written");
+    }
+
     fn app(root: &Path) -> Router {
         let config = AppConfig {
             port: 0,
@@ -108,12 +129,16 @@ mod tests {
         };
         let post_index = PostIndex::load(&config.content_dir).expect("test posts load");
         let note_index = NoteIndex::load(&config.content_dir).expect("test notes load");
+        let page_index = PageIndex::load(&config.content_dir).expect("test pages load");
+        let now_index = NowIndex::load(&config.content_dir).expect("test now entries load");
 
         bootstrap(
             config,
             AppState {
                 post_index,
                 note_index,
+                page_index,
+                now_index,
             },
         )
     }
@@ -253,6 +278,85 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(json["slug"], "note");
         assert_eq!(json["body"], "Note body");
+
+        remove_dir_all(root).expect("test dir can be removed");
+    }
+
+    #[tokio::test]
+    async fn gets_page_by_slug() {
+        let root = test_dir();
+        write_post(
+            &root,
+            "published.mdx",
+            "date: \"2024-01-01\"\ntitle: Published\ndescription: Published post\nbanner: /images/published.jpg\n",
+            "Published body",
+        );
+        write_page(&root, "homepage.mdx", "Homepage body");
+
+        let (status, json) = get_json(app(&root), "/pages/homepage").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["slug"], "homepage");
+        assert_eq!(json["body"], "Homepage body");
+
+        remove_dir_all(root).expect("test dir can be removed");
+    }
+
+    #[tokio::test]
+    async fn lists_now_entries() {
+        let root = test_dir();
+        write_post(
+            &root,
+            "published.mdx",
+            "date: \"2024-01-01\"\ntitle: Published\ndescription: Published post\nbanner: /images/published.jpg\n",
+            "Published body",
+        );
+        write_now(
+            &root,
+            "2023-01.mdx",
+            "date: \"2023-01-04\"\ntitle: January\n",
+            "January body",
+        );
+        write_now(
+            &root,
+            "2022-12.mdx",
+            "date: \"2022-12-01\"\ntitle: December\n",
+            "December body",
+        );
+
+        let (status, json) = get_json(app(&root), "/now/").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            json["entries"].as_array().expect("entries is array").len(),
+            2
+        );
+        assert_eq!(json["entries"][0]["slug"], "2023-01");
+
+        remove_dir_all(root).expect("test dir can be removed");
+    }
+
+    #[tokio::test]
+    async fn gets_now_entry_by_slug() {
+        let root = test_dir();
+        write_post(
+            &root,
+            "published.mdx",
+            "date: \"2024-01-01\"\ntitle: Published\ndescription: Published post\nbanner: /images/published.jpg\n",
+            "Published body",
+        );
+        write_now(
+            &root,
+            "2023-01.mdx",
+            "date: \"2023-01-04\"\ntitle: January\n",
+            "January body",
+        );
+
+        let (status, json) = get_json(app(&root), "/now/2023-01").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["slug"], "2023-01");
+        assert_eq!(json["body"], "January body");
 
         remove_dir_all(root).expect("test dir can be removed");
     }

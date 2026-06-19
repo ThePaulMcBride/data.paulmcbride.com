@@ -125,6 +125,15 @@ Optional note front matter:
 - `media`, a list of objects with `url` and `alt`
 - `tags`
 
+Pages are loaded from `content/pages` at startup. If `content/pages` does not exist, the app starts with an empty page index. Page slugs come from filenames.
+
+Now entries are loaded from `content/now` at startup. If `content/now` does not exist, the app starts with an empty now index.
+
+Now entry front matter requires:
+
+- `date`, formatted as `YYYY-MM-DD`
+- `title`
+
 ## Endpoints
 
 - `GET /health-check`
@@ -135,6 +144,10 @@ Optional note front matter:
 - `GET /notes/`
 - `GET /notes/:slug`
 - `POST /notes/`
+- `GET /pages/:slug`
+- `GET /now`
+- `GET /now/`
+- `GET /now/:slug`
 
 ## Docker
 
