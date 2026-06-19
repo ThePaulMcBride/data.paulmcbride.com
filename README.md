@@ -8,7 +8,7 @@ The app serves static assets from `public/` and exposes JSON endpoints for conte
 
 ## Requirements
 
-- Rust 1.85 or newer
+- Rust 1.86 or newer
 - Docker, optional
 
 ## Local Development
