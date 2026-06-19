@@ -8,7 +8,10 @@ use axum::{
 use serde::Serialize;
 use tower_http::services::ServeDir;
 
-use crate::{config::AppConfig, content::post::PostIndex};
+use crate::{
+    config::AppConfig,
+    content::{note::NoteIndex, post::PostIndex},
+};
 
 mod health_check_routes;
 mod note_routes;
@@ -17,6 +20,7 @@ mod post_routes;
 #[derive(Clone)]
 pub struct AppState {
     pub post_index: PostIndex,
+    pub note_index: NoteIndex,
 }
 
 enum ApiResponse<T: Serialize> {
@@ -38,6 +42,7 @@ pub fn bootstrap(config: AppConfig, state: AppState) -> Router {
         .nest("/health-check", health_check_routes::router())
         .route("/posts/", get(post_routes::list_posts))
         .nest("/posts", post_routes::router())
+        .route("/notes/", get(note_routes::list_notes))
         .nest("/notes", note_routes::router())
         .fallback_service(ServeDir::new(config.public_dir))
         .with_state(state)
@@ -86,6 +91,15 @@ mod tests {
         .expect("test post can be written");
     }
 
+    fn write_note(root: &Path, name: &str, front_matter: &str, body: &str) {
+        create_dir_all(root.join("content/notes")).expect("test notes dir can be created");
+        write(
+            root.join("content/notes").join(name),
+            format!("---\n{}---\n\n{}", front_matter, body),
+        )
+        .expect("test note can be written");
+    }
+
     fn app(root: &Path) -> Router {
         let config = AppConfig {
             port: 0,
@@ -93,8 +107,15 @@ mod tests {
             public_dir: root.join("public"),
         };
         let post_index = PostIndex::load(&config.content_dir).expect("test posts load");
+        let note_index = NoteIndex::load(&config.content_dir).expect("test notes load");
 
-        bootstrap(config, AppState { post_index })
+        bootstrap(
+            config,
+            AppState {
+                post_index,
+                note_index,
+            },
+        )
     }
 
     async fn get_json(app: Router, path: &str) -> (StatusCode, Value) {
@@ -181,6 +202,57 @@ mod tests {
             .expect("request succeeds");
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        remove_dir_all(root).expect("test dir can be removed");
+    }
+
+    #[tokio::test]
+    async fn lists_notes_from_content() {
+        let root = test_dir();
+        write_post(
+            &root,
+            "published.mdx",
+            "date: \"2024-01-01\"\ntitle: Published\ndescription: Published post\nbanner: /images/published.jpg\n",
+            "Published body",
+        );
+        write_note(
+            &root,
+            "note.md",
+            "date: \"2024-01-01T10:00:00Z\"\nsource: mastodon\nsource_id: \"1\"\nsource_url: https://example.com/1\nvisibility: public\n",
+            "Note body",
+        );
+
+        let (status, json) = get_json(app(&root), "/notes/").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["notes"].as_array().expect("notes is array").len(), 1);
+        assert_eq!(json["notes"][0]["slug"], "note");
+        assert_eq!(json["notes"][0]["source"], "mastodon");
+
+        remove_dir_all(root).expect("test dir can be removed");
+    }
+
+    #[tokio::test]
+    async fn gets_note_by_slug() {
+        let root = test_dir();
+        write_post(
+            &root,
+            "published.mdx",
+            "date: \"2024-01-01\"\ntitle: Published\ndescription: Published post\nbanner: /images/published.jpg\n",
+            "Published body",
+        );
+        write_note(
+            &root,
+            "note.md",
+            "date: \"2024-01-01T10:00:00Z\"\nsource: mastodon\nsource_id: \"1\"\nsource_url: https://example.com/1\nvisibility: public\n",
+            "Note body",
+        );
+
+        let (status, json) = get_json(app(&root), "/notes/note").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["slug"], "note");
+        assert_eq!(json["body"], "Note body");
 
         remove_dir_all(root).expect("test dir can be removed");
     }
