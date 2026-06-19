@@ -25,6 +25,15 @@ cargo clippy -- -D warnings
 cargo test
 ```
 
+Run the Mastodon sync skeleton:
+
+```sh
+MASTODON_BASE_URL=https://example.social \
+MASTODON_ACCESS_TOKEN=... \
+MASTODON_ACCOUNT_ID=123456 \
+cargo run --bin sync_mastodon
+```
+
 ## Configuration
 
 The app reads configuration from environment variables.
@@ -36,6 +45,15 @@ The app reads configuration from environment variables.
 | `PUBLIC_DIR` | `public` | Directory containing static assets. |
 
 Invalid `PORT` values fail startup.
+
+The Mastodon sync command also reads configuration from environment variables.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `MASTODON_BASE_URL` | Required | Base URL for the Mastodon instance. |
+| `MASTODON_ACCESS_TOKEN` | Required | Access token for the Mastodon API. |
+| `MASTODON_ACCOUNT_ID` | Required | Account ID to sync statuses from. |
+| `CONTENT_DIR` | `content` | Directory containing content collections. |
 
 ## Content
 
