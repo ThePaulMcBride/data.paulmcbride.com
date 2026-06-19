@@ -1,11 +1,15 @@
-use axum::{extract::Path, routing::get, Router};
+use axum::{
+    extract::{Path, State},
+    routing::get,
+    Router,
+};
 use serde::Serialize;
 use tower_http::compression::CompressionLayer;
 
-use super::ApiResponse;
-use crate::data::posts::{Post, PostService, PostSummary};
+use super::{ApiResponse, AppState};
+use crate::content::post::{Post, PostSummary};
 
-pub fn router() -> Router {
+pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_posts))
         .route("/:slug", get(get_post))
@@ -13,18 +17,18 @@ pub fn router() -> Router {
 }
 
 #[derive(Debug, Serialize)]
-struct PostsResponse {
+pub(super) struct PostsResponse {
     posts: Vec<PostSummary>,
 }
 
-async fn list_posts() -> ApiResponse<PostsResponse> {
-    let posts: Vec<PostSummary> = PostService::get_posts();
+pub async fn list_posts(State(state): State<AppState>) -> ApiResponse<PostsResponse> {
+    let posts: Vec<PostSummary> = state.post_index.posts();
 
     ApiResponse::JsonData(PostsResponse { posts })
 }
 
-async fn get_post(Path(slug): Path<String>) -> ApiResponse<Post> {
-    let post_option = PostService::get_post(&slug);
+async fn get_post(State(state): State<AppState>, Path(slug): Path<String>) -> ApiResponse<Post> {
+    let post_option = state.post_index.post(&slug);
 
     match post_option {
         Some(post) => ApiResponse::JsonData(post),

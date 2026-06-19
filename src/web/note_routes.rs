@@ -7,10 +7,10 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tower_http::compression::CompressionLayer;
 
-use super::ApiResponse;
-use crate::data::notes::{IdentifiableNote, Note, NoteProperties, NoteService, NoteSummary};
+use super::{ApiResponse, AppState};
+use crate::content::note::{IdentifiableNote, Note, NoteProperties, NoteService, NoteSummary};
 
-pub fn router() -> Router {
+pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_notes))
         .route("/", post(create_note))

@@ -2,14 +2,14 @@ use axum::{routing::get, Router};
 use serde::Serialize;
 use tower_http::compression::CompressionLayer;
 
-use super::ApiResponse;
+use super::{ApiResponse, AppState};
 
 #[derive(Serialize)]
 struct HealthCheckResponse {
     status: String,
 }
 
-pub fn router() -> Router {
+pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(health_check))
         .layer(CompressionLayer::new())
