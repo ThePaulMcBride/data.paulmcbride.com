@@ -1,5 +1,7 @@
 # data.paulmcbride.com
 
+[![CI](https://github.com/ThePaulMcBride/data.paulmcbride.com/actions/workflows/ci.yml/badge.svg)](https://github.com/ThePaulMcBride/data.paulmcbride.com/actions/workflows/ci.yml)
+
 Content API for paulmcbride.com.
 
 The app serves static assets from `public/` and exposes JSON endpoints for content in `content/`.
