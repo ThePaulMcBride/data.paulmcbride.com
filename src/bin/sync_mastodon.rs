@@ -1,7 +1,8 @@
 use chrono::{DateTime, Utc};
+use content_paulmcbride_com::content::note::NoteIndex;
 use eyre::WrapErr;
 use serde::Deserialize;
-use std::{env, fmt, path::PathBuf};
+use std::{collections::HashSet, env, fmt, fs, path::PathBuf};
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -11,7 +12,16 @@ async fn main() -> eyre::Result<()> {
     let account = fetch_account(&config)
         .await
         .wrap_err("failed to verify Mastodon account config")?;
-    let statuses = fetch_statuses(&config)
+    let existing_notes =
+        NoteIndex::load(&config.content_dir).wrap_err("failed to load existing notes")?;
+    let existing_source_ids: HashSet<String> = existing_notes
+        .notes()
+        .into_iter()
+        .map(|note| note.front_matter.source_id)
+        .collect();
+    let write_files = env::args().any(|arg| arg == "--write");
+    let full_sync = env::args().any(|arg| arg == "--full");
+    let statuses = fetch_statuses(&config, &existing_source_ids, full_sync)
         .await
         .wrap_err("failed to fetch Mastodon statuses")?;
 
@@ -22,18 +32,39 @@ async fn main() -> eyre::Result<()> {
         config.base_url,
         config.notes_dir().display()
     );
-    println!("Fetched {} recent statuses:", statuses.len());
+    println!(
+        "Fetched {} statuses. Mode: {}.",
+        statuses.len(),
+        sync_mode(write_files, full_sync)
+    );
 
     for status in statuses {
-        println!(
-            "- {} | {} | {} | visibility={} | content={} chars | media={}",
-            status.id,
-            status.created_at,
-            status.url.as_deref().unwrap_or("no public url"),
-            status.visibility,
-            status.content.len(),
-            status.media_attachments.len()
-        );
+        if !status.is_importable_visibility() {
+            println!("- skip {} | visibility={}", status.id, status.visibility);
+            continue;
+        }
+
+        if existing_source_ids.contains(&status.id) {
+            println!("- skip {} | already imported", status.id);
+            continue;
+        }
+
+        let note =
+            MastodonNote::from_status(status).wrap_err("failed to build note from status")?;
+        let note_path = note_path(&config, &note).wrap_err("failed to build note path")?;
+
+        if write_files {
+            fs::create_dir_all(config.notes_dir()).wrap_err("failed to create notes directory")?;
+            fs::write(&note_path, note.to_markdown())
+                .wrap_err_with(|| format!("failed to write note file {}", note_path.display()))?;
+            println!("- write {} | {}", note.source_id, note_path.display());
+        } else {
+            println!(
+                "- dry-run {} | would write {}",
+                note.source_id,
+                note_path.display()
+            );
+        }
     }
 
     Ok(())
@@ -65,19 +96,65 @@ async fn fetch_account(config: &MastodonSyncConfig) -> Result<MastodonAccount, M
 
 async fn fetch_statuses(
     config: &MastodonSyncConfig,
+    existing_source_ids: &HashSet<String>,
+    full_sync: bool,
+) -> Result<Vec<MastodonStatus>, MastodonApiError> {
+    let mut statuses = Vec::new();
+    let mut max_id: Option<String> = None;
+
+    loop {
+        let mut page = fetch_status_page(config, max_id.as_deref()).await?;
+
+        if page.is_empty() {
+            break;
+        }
+
+        if !full_sync && existing_source_ids.is_empty() {
+            statuses.append(&mut page);
+            break;
+        }
+
+        if !full_sync {
+            if let Some(existing_index) = page
+                .iter()
+                .position(|status| existing_source_ids.contains(&status.id))
+            {
+                statuses.extend(page.into_iter().take(existing_index));
+                break;
+            }
+        }
+
+        max_id = page.last().map(|status| status.id.clone());
+        statuses.append(&mut page);
+    }
+
+    Ok(statuses)
+}
+
+async fn fetch_status_page(
+    config: &MastodonSyncConfig,
+    max_id: Option<&str>,
 ) -> Result<Vec<MastodonStatus>, MastodonApiError> {
     let url = format!(
         "{}/api/v1/accounts/{}/statuses",
         config.base_url.trim_end_matches('/'),
         config.account_id,
     );
-    let response = reqwest::Client::new()
+
+    let mut request = reqwest::Client::new()
         .get(&url)
         .bearer_auth(&config.access_token)
-        .query(&[("limit", "5"), ("exclude_reblogs", "true")])
-        .send()
-        .await
-        .map_err(MastodonApiError::Request)?;
+        .query(&[
+            ("limit", "40"),
+            ("exclude_reblogs", "true"),
+            ("exclude_replies", "true"),
+        ]);
+
+    if let Some(max_id) = max_id {
+        request = request.query(&[("max_id", max_id)]);
+    }
+
+    let response = request.send().await.map_err(MastodonApiError::Request)?;
 
     let status = response.status();
     if !status.is_success() {
@@ -100,14 +177,91 @@ struct MastodonAccount {
 struct MastodonStatus {
     id: String,
     created_at: String,
+    uri: String,
     url: Option<String>,
     visibility: String,
     content: String,
     media_attachments: Vec<MastodonMediaAttachment>,
 }
 
+impl MastodonStatus {
+    fn is_importable_visibility(&self) -> bool {
+        matches!(self.visibility.as_str(), "public" | "unlisted")
+    }
+}
+
 #[derive(Debug, Deserialize)]
-struct MastodonMediaAttachment {}
+struct MastodonMediaAttachment {
+    url: String,
+    description: Option<String>,
+}
+
+struct MastodonNote {
+    created_at: String,
+    source_id: String,
+    source_url: String,
+    visibility: String,
+    body: String,
+    media: Vec<MastodonNoteMedia>,
+}
+
+impl MastodonNote {
+    fn from_status(status: MastodonStatus) -> Result<Self, NoteFilenameError> {
+        DateTime::parse_from_rfc3339(&status.created_at).map_err(|source| {
+            NoteFilenameError::InvalidCreatedAt {
+                value: status.created_at.clone(),
+                source,
+            }
+        })?;
+
+        Ok(Self {
+            created_at: status.created_at,
+            source_id: status.id,
+            source_url: status.url.unwrap_or(status.uri),
+            visibility: status.visibility,
+            body: html_to_text(&status.content),
+            media: status
+                .media_attachments
+                .into_iter()
+                .map(|media| MastodonNoteMedia {
+                    url: media.url,
+                    alt: media.description.unwrap_or_default(),
+                })
+                .collect(),
+        })
+    }
+
+    fn to_markdown(&self) -> String {
+        let mut front_matter = vec![
+            "---".to_string(),
+            format!("date: \"{}\"", yaml_escape(&self.created_at)),
+            "source: mastodon".to_string(),
+            format!("source_id: \"{}\"", yaml_escape(&self.source_id)),
+            format!("source_url: \"{}\"", yaml_escape(&self.source_url)),
+            format!("visibility: {}", self.visibility),
+        ];
+
+        if !self.media.is_empty() {
+            front_matter.push("media:".to_string());
+            for media in &self.media {
+                front_matter.push(format!("  - url: \"{}\"", yaml_escape(&media.url)));
+                front_matter.push(format!("    alt: \"{}\"", yaml_escape(&media.alt)));
+            }
+        }
+
+        front_matter.push("---".to_string());
+        front_matter.push(String::new());
+        front_matter.push(self.body.clone());
+        front_matter.push(String::new());
+
+        front_matter.join("\n")
+    }
+}
+
+struct MastodonNoteMedia {
+    url: String,
+    alt: String,
+}
 
 #[derive(Debug)]
 struct MastodonSyncConfig {
@@ -191,6 +345,66 @@ fn required_env(name: &'static str) -> Result<String, MastodonSyncConfigError> {
     }
 }
 
+fn sync_mode(write_files: bool, full_sync: bool) -> &'static str {
+    match (write_files, full_sync) {
+        (true, true) => "write/full",
+        (true, false) => "write/incremental",
+        (false, true) => "dry-run/full",
+        (false, false) => "dry-run/incremental",
+    }
+}
+
+fn note_path(
+    config: &MastodonSyncConfig,
+    note: &MastodonNote,
+) -> Result<PathBuf, NoteFilenameError> {
+    let filename = note_filename(&note.created_at, None)?;
+    let path = config.notes_dir().join(&filename);
+
+    if path.exists() {
+        return Ok(config
+            .notes_dir()
+            .join(note_filename(&note.created_at, Some(&note.source_id))?));
+    }
+
+    Ok(path)
+}
+
+fn html_to_text(html: &str) -> String {
+    let with_breaks = html
+        .replace("</p><p>", "\n\n")
+        .replace("</p>", "\n")
+        .replace("<br />", "\n")
+        .replace("<br/>", "\n")
+        .replace("<br>", "\n");
+
+    let mut text = String::new();
+    let mut in_tag = false;
+
+    for character in with_breaks.chars() {
+        match character {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => text.push(character),
+            _ => {}
+        }
+    }
+
+    decode_html_entities(text.trim()).to_string()
+}
+
+fn decode_html_entities(text: &str) -> String {
+    text.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+}
+
+fn yaml_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 pub fn note_filename(
     created_at: &str,
     collision_suffix: Option<&str>,
@@ -264,5 +478,100 @@ mod tests {
         let error = note_filename("not-a-date", None).expect_err("invalid date should fail");
 
         assert!(matches!(error, NoteFilenameError::InvalidCreatedAt { .. }));
+    }
+
+    #[test]
+    fn converts_mastodon_html_to_text() {
+        let text = html_to_text(
+            "<p>Hello <a href=\"https://example.com\">world</a> &amp; friends</p><p>Second<br />line</p>",
+        );
+
+        assert_eq!(text, "Hello world & friends\n\nSecond\nline");
+    }
+
+    #[test]
+    fn builds_note_markdown_from_status() {
+        let status = MastodonStatus {
+            id: "123456789".to_string(),
+            created_at: "2026-06-18T20:30:00Z".to_string(),
+            uri: "https://example.social/users/paul/statuses/123456789".to_string(),
+            url: Some("https://example.social/@paul/123456789".to_string()),
+            visibility: "public".to_string(),
+            content: "<p>Hello &amp; welcome</p>".to_string(),
+            media_attachments: vec![MastodonMediaAttachment {
+                url: "https://cdn.example.social/image.jpg".to_string(),
+                description: Some("Alt text".to_string()),
+            }],
+        };
+
+        let note = MastodonNote::from_status(status).expect("note is valid");
+        let markdown = note.to_markdown();
+
+        assert!(markdown.contains("date: \"2026-06-18T20:30:00Z\""));
+        assert!(markdown.contains("source: mastodon"));
+        assert!(markdown.contains("source_id: \"123456789\""));
+        assert!(markdown.contains("source_url: \"https://example.social/@paul/123456789\""));
+        assert!(markdown.contains("visibility: public"));
+        assert!(markdown.contains("  - url: \"https://cdn.example.social/image.jpg\""));
+        assert!(markdown.contains("    alt: \"Alt text\""));
+        assert!(markdown.contains("Hello & welcome"));
+    }
+
+    #[test]
+    fn falls_back_to_uri_when_status_has_no_public_url() {
+        let status = MastodonStatus {
+            id: "123456789".to_string(),
+            created_at: "2026-06-18T20:30:00Z".to_string(),
+            uri: "https://example.social/users/paul/statuses/123456789".to_string(),
+            url: None,
+            visibility: "public".to_string(),
+            content: "<p>Hello</p>".to_string(),
+            media_attachments: Vec::new(),
+        };
+
+        let note = MastodonNote::from_status(status).expect("note is valid");
+
+        assert_eq!(
+            note.source_url,
+            "https://example.social/users/paul/statuses/123456789"
+        );
+    }
+
+    #[test]
+    fn imports_public_and_unlisted_statuses() {
+        let public_status = status_with_visibility("public");
+        let unlisted_status = status_with_visibility("unlisted");
+
+        assert!(public_status.is_importable_visibility());
+        assert!(unlisted_status.is_importable_visibility());
+    }
+
+    #[test]
+    fn skips_private_and_direct_statuses() {
+        let private_status = status_with_visibility("private");
+        let direct_status = status_with_visibility("direct");
+
+        assert!(!private_status.is_importable_visibility());
+        assert!(!direct_status.is_importable_visibility());
+    }
+
+    #[test]
+    fn describes_sync_modes() {
+        assert_eq!(sync_mode(false, false), "dry-run/incremental");
+        assert_eq!(sync_mode(true, false), "write/incremental");
+        assert_eq!(sync_mode(false, true), "dry-run/full");
+        assert_eq!(sync_mode(true, true), "write/full");
+    }
+
+    fn status_with_visibility(visibility: &str) -> MastodonStatus {
+        MastodonStatus {
+            id: "123456789".to_string(),
+            created_at: "2026-06-18T20:30:00Z".to_string(),
+            uri: "https://example.social/users/paul/statuses/123456789".to_string(),
+            url: Some("https://example.social/@paul/123456789".to_string()),
+            visibility: visibility.to_string(),
+            content: "<p>Hello</p>".to_string(),
+            media_attachments: Vec::new(),
+        }
     }
 }

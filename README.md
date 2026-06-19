@@ -36,6 +36,22 @@ MASTODON_ACCOUNT_ID=123456 \
 cargo run --bin sync_mastodon
 ```
 
+The sync command runs in dry-run mode by default. To write new note files to `CONTENT_DIR/notes`, pass `--write`:
+
+```sh
+cargo run --bin sync_mastodon -- --write
+```
+
+By default, the sync command runs incrementally. It fetches newest statuses first and stops paginating when it reaches a status that already exists in `CONTENT_DIR/notes`. If there are no existing notes yet, incremental mode fetches only the newest page.
+
+For an initial backfill, pass `--full`:
+
+```sh
+cargo run --bin sync_mastodon -- --full --write
+```
+
+The sync command imports `public` and `unlisted` statuses, and skips `private` and `direct` statuses.
+
 For local development, copy `.env.example` to `.env` and fill in local values. The binaries load `.env` automatically when it exists. `.env` files are ignored by Git.
 
 ## Configuration
