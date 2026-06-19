@@ -14,7 +14,7 @@ The app serves static assets from `public/` and exposes JSON endpoints for conte
 Run the server:
 
 ```sh
-cargo run
+cargo run --bin web
 ```
 
 Run checks:

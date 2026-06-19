@@ -1,7 +1,4 @@
-mod config;
-mod content;
-mod web;
-
+use content_paulmcbride_com::{config, content, web};
 use eyre::WrapErr;
 use std::net::{Ipv4Addr, SocketAddr};
 
