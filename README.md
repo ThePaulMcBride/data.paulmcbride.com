@@ -52,6 +52,56 @@ cargo run --bin sync_mastodon -- --full --write
 
 The sync command imports `public` and `unlisted` statuses, and skips `private` and `direct` statuses.
 
+### Recurring Mastodon sync on Railway
+
+The Docker image includes both binaries:
+
+- `web`, the API server
+- `sync_mastodon`, the Mastodon import command
+- `sync-mastodon-and-push`, the Railway cron entrypoint
+
+Deploy the recurring sync as a separate Railway cron service from the same repo as the API service, but with this command:
+
+```sh
+sync-mastodon-and-push
+```
+
+The repository includes a separate Railway config and Dockerfile for this service:
+
+```sh
+railway.mastodon-sync.toml
+Dockerfile.sync
+```
+
+Use that config for the cron service so the API service can keep using `railway.toml` with its healthcheck.
+
+Set the cron schedule in Railway, for example hourly. The cron command clones the repository, runs the Mastodon sync against the checkout, commits new files under `content/notes`, and pushes them to `main`. That push triggers Railway to rebuild and redeploy the API service with the new notes baked into the image.
+
+Configure the cron service with these variables:
+
+- `MASTODON_BASE_URL`
+- `MASTODON_ACCESS_TOKEN`
+- `MASTODON_ACCOUNT_ID`
+- `GITHUB_TOKEN`, a token with permission to push to this repository
+
+Optional variables:
+
+- `GITHUB_REPOSITORY`, defaults to `ThePaulMcBride/data.paulmcbride.com`
+- `GIT_BRANCH`, defaults to `main`
+- `COMMIT_MESSAGE`, defaults to `sync mastodon notes`
+
+The cron command exits without committing when there are no new notes.
+
+To test the cron flow locally:
+
+```sh
+GITHUB_TOKEN=... \
+MASTODON_BASE_URL=https://example.social \
+MASTODON_ACCESS_TOKEN=... \
+MASTODON_ACCOUNT_ID=123456 \
+scripts/sync-mastodon-and-push.sh
+```
+
 For local development, copy `.env.example` to `.env` and fill in local values. The binaries load `.env` automatically when it exists. `.env` files are ignored by Git.
 
 ## Configuration

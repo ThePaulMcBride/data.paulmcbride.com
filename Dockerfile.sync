@@ -1,0 +1,26 @@
+FROM rust:1.86-slim AS builder
+
+WORKDIR /app
+
+COPY Cargo.lock Cargo.toml ./
+COPY src/ src/
+
+RUN cargo build --release --locked --bin sync_mastodon
+
+FROM debian:bookworm-slim AS runtime
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates git \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --uid 10001 --home-dir /app appuser
+
+COPY --from=builder /app/target/release/sync_mastodon /usr/local/bin/sync_mastodon
+COPY scripts/sync-mastodon-and-push.sh /usr/local/bin/sync-mastodon-and-push
+
+RUN chmod +x /usr/local/bin/sync-mastodon-and-push
+
+USER appuser
+
+CMD ["sync-mastodon-and-push"]

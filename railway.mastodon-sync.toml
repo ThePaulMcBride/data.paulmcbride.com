@@ -1,0 +1,9 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile.sync"
+
+[deploy]
+startCommand = "sync-mastodon-and-push"
+cronSchedule = "17 * * * *"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
