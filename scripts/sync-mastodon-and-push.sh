@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-: "${GITHUB_ACCESS_TOKEN:?GITHUB_TOKEN is required}"
+: "${GITHUB_ACCESS_TOKEN:?GITHUB_ACCESS_TOKEN is required}"
 : "${MASTODON_BASE_URL:?MASTODON_BASE_URL is required}"
 : "${MASTODON_ACCESS_TOKEN:?MASTODON_ACCESS_TOKEN is required}"
 : "${MASTODON_ACCOUNT_ID:?MASTODON_ACCOUNT_ID is required}"

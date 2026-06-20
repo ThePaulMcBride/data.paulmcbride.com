@@ -82,7 +82,7 @@ Configure the cron service with these variables:
 - `MASTODON_BASE_URL`
 - `MASTODON_ACCESS_TOKEN`
 - `MASTODON_ACCOUNT_ID`
-- `GITHUB_TOKEN`, a token with permission to push to this repository
+- `GITHUB_ACCESS_TOKEN`, a token with permission to push to this repository
 
 Optional variables:
 
@@ -95,7 +95,7 @@ The cron command exits without committing when there are no new notes.
 To test the cron flow locally:
 
 ```sh
-GITHUB_TOKEN=... \
+GITHUB_ACCESS_TOKEN=... \
 MASTODON_BASE_URL=https://example.social \
 MASTODON_ACCESS_TOKEN=... \
 MASTODON_ACCOUNT_ID=123456 \
