@@ -15,7 +15,9 @@ reqwest = { version = "0.12.22", default-features = false, features = ["json", "
 serde = { version = "1.0.195", features = ["derive"] }
 serde_json = "1.0.111"
 tokio = { version = "1.35.1", features = ["full"] }
-tower-http = { version = "0.5.0", features = ["fs", "compression-br"] }
+tower-http = { version = "0.5.0", features = ["fs", "compression-br", "trace"] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
 
 [dev-dependencies]
 tower = "0.4.13"

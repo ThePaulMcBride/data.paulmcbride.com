@@ -1,10 +1,12 @@
 use content_paulmcbride_com::{config, content, web};
 use eyre::WrapErr;
 use std::net::{Ipv4Addr, SocketAddr};
+use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     dotenvy::dotenv().ok();
+    init_tracing();
 
     let config = config::AppConfig::from_env().wrap_err("failed to read app config")?;
     let post_index = content::post::PostIndex::load(&config.content_dir)
@@ -26,7 +28,7 @@ async fn main() -> eyre::Result<()> {
         },
     );
 
-    println!("Listening on http://{}", bind_addr);
+    tracing::info!(%bind_addr, "listening");
     let listener = tokio::net::TcpListener::bind(bind_addr)
         .await
         .wrap_err_with(|| format!("failed to bind to {}", bind_addr))?;
@@ -35,4 +37,14 @@ async fn main() -> eyre::Result<()> {
         .wrap_err("server stopped unexpectedly")?;
 
     Ok(())
+}
+
+fn init_tracing() {
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("content_paulmcbride_com=info,web=info,tower_http=info"));
+
+    tracing_subscriber::fmt()
+        .json()
+        .with_env_filter(filter)
+        .init();
 }

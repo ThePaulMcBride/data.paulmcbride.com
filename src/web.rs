@@ -7,6 +7,8 @@ use axum::{
 };
 use serde::Serialize;
 use tower_http::services::ServeDir;
+use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
+use tracing::Level;
 
 use crate::{
     config::AppConfig,
@@ -52,6 +54,11 @@ pub fn bootstrap(config: AppConfig, state: AppState) -> Router {
         .nest("/now", now_routes::router())
         .nest("/pages", page_routes::router())
         .fallback_service(ServeDir::new(config.public_dir))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
+                .on_response(DefaultOnResponse::new().level(Level::INFO)),
+        )
         .with_state(state)
 }
 
