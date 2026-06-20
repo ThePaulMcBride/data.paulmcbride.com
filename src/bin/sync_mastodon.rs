@@ -302,7 +302,7 @@ impl MastodonNote {
             front_matter.push("media:".to_string());
             for media in &self.media {
                 front_matter.push(format!("  - url: \"{}\"", yaml_escape(&media.url)));
-                front_matter.push(format!("    alt: \"{}\"", yaml_escape(&media.alt)));
+                front_matter.extend(yaml_string_field("    alt", &media.alt));
             }
         }
 
@@ -462,6 +462,16 @@ fn yaml_escape(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+fn yaml_string_field(name: &str, value: &str) -> Vec<String> {
+    if value.contains('\n') {
+        let mut lines = vec![format!("{name}: |-")];
+        lines.extend(value.lines().map(|line| format!("      {line}")));
+        lines
+    } else {
+        vec![format!("{name}: \"{}\"", yaml_escape(value))]
+    }
+}
+
 pub fn note_filename(
     created_at: &str,
     collision_suffix: Option<&str>,
@@ -572,6 +582,27 @@ mod tests {
         assert!(markdown.contains("  - url: \"https://cdn.example.social/image.jpg\""));
         assert!(markdown.contains("    alt: \"Alt text\""));
         assert!(markdown.contains("Hello & welcome"));
+    }
+
+    #[test]
+    fn writes_multiline_media_alt_as_yaml_block_scalar() {
+        let status = MastodonStatus {
+            id: "123456789".to_string(),
+            created_at: "2026-06-18T20:30:00Z".to_string(),
+            uri: "https://example.social/users/paul/statuses/123456789".to_string(),
+            url: Some("https://example.social/@paul/123456789".to_string()),
+            visibility: "public".to_string(),
+            content: "<p>Hello</p>".to_string(),
+            media_attachments: vec![MastodonMediaAttachment {
+                url: "https://cdn.example.social/image.jpg".to_string(),
+                description: Some("First line\n\nSecond line".to_string()),
+            }],
+        };
+
+        let note = MastodonNote::from_status(status).expect("note is valid");
+        let markdown = note.to_markdown();
+
+        assert!(markdown.contains("    alt: |-\n      First line\n      \n      Second line"));
     }
 
     #[test]
