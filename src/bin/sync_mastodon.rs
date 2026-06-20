@@ -3,10 +3,12 @@ use content_paulmcbride_com::content::note::NoteIndex;
 use eyre::WrapErr;
 use serde::Deserialize;
 use std::{collections::HashSet, env, fmt, fs, path::PathBuf};
+use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     dotenvy::dotenv().ok();
+    init_tracing();
 
     let config = MastodonSyncConfig::from_env().wrap_err("failed to read Mastodon sync config")?;
     let account = fetch_account(&config)
@@ -24,28 +26,37 @@ async fn main() -> eyre::Result<()> {
     let statuses = fetch_statuses(&config, &existing_source_ids, full_sync)
         .await
         .wrap_err("failed to fetch Mastodon statuses")?;
+    let mut summary = SyncSummary::new(statuses.len());
 
-    println!(
-        "Mastodon sync configured for @{} ({}) on {}. Notes will be written under {}.",
-        account.acct,
-        account.display_name,
-        config.base_url,
-        config.notes_dir().display()
-    );
-    println!(
-        "Fetched {} statuses. Mode: {}.",
-        statuses.len(),
-        sync_mode(write_files, full_sync)
+    tracing::info!(
+        account = %account.acct,
+        display_name = %account.display_name,
+        base_url = %config.base_url,
+        notes_dir = %config.notes_dir().display(),
+        mode = %sync_mode(write_files, full_sync),
+        fetched = summary.fetched,
+        "mastodon sync started"
     );
 
     for status in statuses {
         if !status.is_importable_visibility() {
-            println!("- skip {} | visibility={}", status.id, status.visibility);
+            summary.skipped_visibility += 1;
+            tracing::info!(
+                source_id = %status.id,
+                visibility = %status.visibility,
+                reason = "visibility",
+                "skipped mastodon status"
+            );
             continue;
         }
 
         if existing_source_ids.contains(&status.id) {
-            println!("- skip {} | already imported", status.id);
+            summary.skipped_existing += 1;
+            tracing::info!(
+                source_id = %status.id,
+                reason = "already_imported",
+                "skipped mastodon status"
+            );
             continue;
         }
 
@@ -57,17 +68,63 @@ async fn main() -> eyre::Result<()> {
             fs::create_dir_all(config.notes_dir()).wrap_err("failed to create notes directory")?;
             fs::write(&note_path, note.to_markdown())
                 .wrap_err_with(|| format!("failed to write note file {}", note_path.display()))?;
-            println!("- write {} | {}", note.source_id, note_path.display());
+            summary.written += 1;
+            tracing::info!(
+                source_id = %note.source_id,
+                path = %note_path.display(),
+                "wrote mastodon note"
+            );
         } else {
-            println!(
-                "- dry-run {} | would write {}",
-                note.source_id,
-                note_path.display()
+            summary.dry_run += 1;
+            tracing::info!(
+                source_id = %note.source_id,
+                path = %note_path.display(),
+                "would write mastodon note"
             );
         }
     }
 
+    tracing::info!(
+        fetched = summary.fetched,
+        written = summary.written,
+        dry_run = summary.dry_run,
+        skipped_existing = summary.skipped_existing,
+        skipped_visibility = summary.skipped_visibility,
+        mode = %sync_mode(write_files, full_sync),
+        "mastodon sync completed"
+    );
+
     Ok(())
+}
+
+fn init_tracing() {
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("sync_mastodon=info"));
+
+    tracing_subscriber::fmt()
+        .json()
+        .with_env_filter(filter)
+        .init();
+}
+
+struct SyncSummary {
+    fetched: usize,
+    written: usize,
+    dry_run: usize,
+    skipped_existing: usize,
+    skipped_visibility: usize,
+}
+
+impl SyncSummary {
+    fn new(fetched: usize) -> Self {
+        Self {
+            fetched,
+            written: 0,
+            dry_run: 0,
+            skipped_existing: 0,
+            skipped_visibility: 0,
+        }
+    }
 }
 
 async fn fetch_account(config: &MastodonSyncConfig) -> Result<MastodonAccount, MastodonApiError> {
