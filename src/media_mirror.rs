@@ -2,6 +2,7 @@ use aws_config::{BehaviorVersion, Region};
 use aws_credential_types::Credentials;
 use aws_sdk_s3::{config::Builder as S3ConfigBuilder, primitives::ByteStream, Client};
 use reqwest::Url;
+use sha2::{Digest, Sha256};
 use std::{env, fmt};
 
 #[derive(Clone, Debug)]
@@ -57,6 +58,10 @@ impl MediaMirrorConfig {
     pub fn is_mirrored_url(&self, url: &str) -> bool {
         self.target.is_mirrored_url(url)
     }
+
+    pub fn is_hashed_mirrored_url(&self, url: &str) -> bool {
+        self.target.is_hashed_mirrored_url(url)
+    }
 }
 
 impl MediaMirrorTargetConfig {
@@ -73,7 +78,20 @@ impl MediaMirrorTargetConfig {
         format!(
             "{}/{}",
             self.public_base_url,
-            self.object_key(source_id, media_index, source_url, None)
+            self.legacy_object_key(source_id, media_index, source_url, None)
+        )
+    }
+
+    pub fn public_hashed_url_for(
+        &self,
+        source_url: &str,
+        content_type: Option<&str>,
+        bytes: &[u8],
+    ) -> String {
+        format!(
+            "{}/{}",
+            self.public_base_url,
+            self.hashed_object_key(source_url, content_type, bytes)
         )
     }
 
@@ -81,20 +99,61 @@ impl MediaMirrorTargetConfig {
         url.starts_with(&format!("{}/", self.public_base_url))
     }
 
-    fn object_key(
+    pub fn is_hashed_mirrored_url(&self, url: &str) -> bool {
+        let Ok(url) = Url::parse(url) else {
+            return false;
+        };
+        let Ok(base_url) = Url::parse(&self.public_base_url) else {
+            return false;
+        };
+
+        if url.scheme() != base_url.scheme() || url.host_str() != base_url.host_str() {
+            return false;
+        }
+
+        let Some(segments) = url.path_segments() else {
+            return false;
+        };
+        let expected_prefix = self.key_prefix.trim_matches('/');
+        let segments: Vec<_> = segments.collect();
+        if segments.len() != 2 || segments[0] != expected_prefix {
+            return false;
+        }
+
+        let Some((hash, extension)) = segments[1].rsplit_once('.') else {
+            return false;
+        };
+
+        hash.len() == 64
+            && !extension.is_empty()
+            && hash.chars().all(|character| character.is_ascii_hexdigit())
+    }
+
+    fn hashed_object_key(
+        &self,
+        source_url: &str,
+        content_type: Option<&str>,
+        bytes: &[u8],
+    ) -> String {
+        let extension = media_extension(source_url, content_type);
+        let hash = sha256_hex(bytes);
+
+        format!(
+            "{}/{}.{}",
+            self.key_prefix.trim_matches('/'),
+            hash,
+            extension
+        )
+    }
+
+    fn legacy_object_key(
         &self,
         source_id: &str,
         media_index: usize,
         source_url: &str,
         content_type: Option<&str>,
     ) -> String {
-        let extension = extension_from_url(source_url)
-            .or_else(|| {
-                content_type
-                    .and_then(extension_from_content_type)
-                    .map(str::to_string)
-            })
-            .unwrap_or_else(|| "bin".to_string());
+        let extension = media_extension(source_url, content_type);
 
         format!(
             "{}/{}/{}.{}",
@@ -147,13 +206,17 @@ impl MediaMirror {
         self.config.is_mirrored_url(url)
     }
 
+    pub fn is_hashed_mirrored_url(&self, url: &str) -> bool {
+        self.config.is_hashed_mirrored_url(url)
+    }
+
     pub async fn mirror(
         &self,
-        source_id: &str,
-        media_index: usize,
+        _source_id: &str,
+        _media_index: usize,
         source_url: &str,
     ) -> Result<String, MediaMirrorError> {
-        if self.is_mirrored_url(source_url) {
+        if self.is_hashed_mirrored_url(source_url) {
             return Ok(source_url.to_string());
         }
 
@@ -174,12 +237,10 @@ impl MediaMirror {
             .and_then(|value| value.to_str().ok())
             .map(|value| value.split(';').next().unwrap_or(value).trim().to_string());
         let bytes = response.bytes().await.map_err(MediaMirrorError::Download)?;
-        let object_key = self.config.target.object_key(
-            source_id,
-            media_index,
-            source_url,
-            content_type.as_deref(),
-        );
+        let object_key =
+            self.config
+                .target
+                .hashed_object_key(source_url, content_type.as_deref(), &bytes);
 
         let mut request = self
             .s3_client
@@ -342,6 +403,21 @@ fn extension_from_content_type(content_type: &str) -> Option<&'static str> {
     }
 }
 
+fn media_extension(source_url: &str, content_type: Option<&str>) -> String {
+    extension_from_url(source_url)
+        .or_else(|| {
+            content_type
+                .and_then(extension_from_content_type)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "bin".to_string())
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 fn sanitize_key_segment(value: &str) -> String {
     value
         .chars()
@@ -364,14 +440,17 @@ mod tests {
     }
 
     #[test]
-    fn builds_public_url_from_source_id_and_media_index() {
-        let url = config().public_url_for(
-            "123456789",
-            1,
+    fn builds_public_url_from_content_hash() {
+        let url = config().public_hashed_url_for(
             "https://cdn.masto.host/example/original/image.jpeg",
+            None,
+            b"image bytes",
         );
 
-        assert_eq!(url, "https://cdn.example.com/mastodon/123456789/2.jpeg");
+        assert_eq!(
+            url,
+            "https://cdn.example.com/mastodon/de7030234493a8bea844dbe1d8676e68a2c1a4b014c721f0425a22b6df66faec.jpeg"
+        );
     }
 
     #[test]
@@ -381,15 +460,25 @@ mod tests {
     }
 
     #[test]
+    fn detects_hashed_mirrored_urls() {
+        assert!(config().is_hashed_mirrored_url(
+            "https://cdn.example.com/mastodon/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.jpg"
+        ));
+        assert!(!config().is_hashed_mirrored_url("https://cdn.example.com/mastodon/123/1.jpg"));
+    }
+
+    #[test]
     fn falls_back_to_content_type_for_extension() {
-        let key = config().object_key(
-            "source/id",
-            0,
+        let key = config().hashed_object_key(
             "https://example.com/media",
             Some("image/jpeg"),
+            b"image bytes",
         );
 
-        assert_eq!(key, "mastodon/source-id/1.jpg");
+        assert_eq!(
+            key,
+            "mastodon/de7030234493a8bea844dbe1d8676e68a2c1a4b014c721f0425a22b6df66faec.jpg"
+        );
     }
 
     #[test]

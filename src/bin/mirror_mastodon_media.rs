@@ -52,7 +52,7 @@ async fn main() -> eyre::Result<()> {
         for (index, media) in media.iter_mut().enumerate() {
             summary.media_seen += 1;
 
-            if mirror_target_config.is_mirrored_url(&media.url) {
+            if mirror_target_config.is_hashed_mirrored_url(&media.url) {
                 summary.skipped_existing += 1;
                 continue;
             }

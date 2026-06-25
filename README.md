@@ -52,7 +52,7 @@ cargo run --bin sync_mastodon -- --full --write
 
 The sync command imports `public` and `unlisted` statuses, and skips `private` and `direct` statuses.
 
-If Backblaze B2 S3-compatible media mirroring is configured, `sync_mastodon --write` downloads media attachments from Mastodon, uploads them to B2, and writes the mirrored public URLs into note front matter. Without the B2 variables, sync keeps the original Mastodon media URLs.
+If Backblaze B2 S3-compatible media mirroring is configured, `sync_mastodon --write` downloads media attachments from Mastodon, uploads them to B2 using content-hash object keys, and writes the mirrored public URLs into note front matter. Without the B2 variables, sync keeps the original Mastodon media URLs.
 
 Mirror existing Mastodon media URLs in already-imported notes:
 
@@ -108,6 +108,8 @@ Configure these optional variables to mirror new Mastodon media into Backblaze B
 - `B2_PUBLIC_BASE_URL`, for example a Backblaze public bucket URL or custom CDN domain
 - `B2_KEY_PREFIX`, defaults to `mastodon`
 
+Mirrored media object keys use the form `{B2_KEY_PREFIX}/{sha256}.{extension}`, for example `mastodon/e14a247a27824aa1d896bdfe4050c9793ab70f0d9bfe86c6731fa5d120232292.jpg`.
+
 Optional variables:
 
 - `GITHUB_REPOSITORY`, defaults to `ThePaulMcBride/data.paulmcbride.com`
@@ -154,7 +156,7 @@ The Mastodon sync command also reads configuration from environment variables.
 | `B2_KEY_ID` | Optional | B2 application key ID. |
 | `B2_APPLICATION_KEY` | Optional | B2 application key secret. |
 | `B2_PUBLIC_BASE_URL` | Optional | Public base URL used in note front matter after uploads. |
-| `B2_KEY_PREFIX` | `mastodon` | Object key prefix for mirrored Mastodon media. |
+| `B2_KEY_PREFIX` | `mastodon` | Object key prefix for mirrored Mastodon media. Objects are written as `{B2_KEY_PREFIX}/{sha256}.{extension}`. |
 
 ## Content
 
