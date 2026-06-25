@@ -1,5 +1,8 @@
 use chrono::{DateTime, Utc};
-use content_paulmcbride_com::content::note::NoteIndex;
+use content_paulmcbride_com::{
+    content::note::NoteIndex,
+    media_mirror::{MediaMirror, MediaMirrorConfig},
+};
 use eyre::WrapErr;
 use serde::Deserialize;
 use std::{collections::HashSet, env, fmt, fs, path::PathBuf};
@@ -26,6 +29,16 @@ async fn main() -> eyre::Result<()> {
     let statuses = fetch_statuses(&config, &existing_source_ids, full_sync)
         .await
         .wrap_err("failed to fetch Mastodon statuses")?;
+    let media_mirror_config =
+        MediaMirrorConfig::optional_from_env().wrap_err("failed to read media mirror config")?;
+    let media_mirror = if write_files {
+        match media_mirror_config {
+            Some(config) => Some(MediaMirror::new(config).await),
+            None => None,
+        }
+    } else {
+        None
+    };
     let mut summary = SyncSummary::new(statuses.len());
 
     tracing::info!(
@@ -60,11 +73,16 @@ async fn main() -> eyre::Result<()> {
             continue;
         }
 
-        let note =
+        let mut note =
             MastodonNote::from_status(status).wrap_err("failed to build note from status")?;
         let note_path = note_path(&config, &note).wrap_err("failed to build note path")?;
 
         if write_files {
+            if let Some(media_mirror) = &media_mirror {
+                note.mirror_media(media_mirror)
+                    .await
+                    .wrap_err("failed to mirror note media")?;
+            }
             fs::create_dir_all(config.notes_dir()).wrap_err("failed to create notes directory")?;
             fs::write(&note_path, note.to_markdown())
                 .wrap_err_with(|| format!("failed to write note file {}", note_path.display()))?;
@@ -312,6 +330,18 @@ impl MastodonNote {
         front_matter.push(String::new());
 
         front_matter.join("\n")
+    }
+
+    async fn mirror_media(&mut self, media_mirror: &MediaMirror) -> eyre::Result<()> {
+        for (index, media) in self.media.iter_mut().enumerate() {
+            let mirrored_url = media_mirror
+                .mirror(&self.source_id, index, &media.url)
+                .await
+                .wrap_err_with(|| format!("failed to mirror media {}", media.url))?;
+            media.url = mirrored_url;
+        }
+
+        Ok(())
     }
 }
 

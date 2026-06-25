@@ -52,6 +52,20 @@ cargo run --bin sync_mastodon -- --full --write
 
 The sync command imports `public` and `unlisted` statuses, and skips `private` and `direct` statuses.
 
+If Backblaze B2 S3-compatible media mirroring is configured, `sync_mastodon --write` downloads media attachments from Mastodon, uploads them to B2, and writes the mirrored public URLs into note front matter. Without the B2 variables, sync keeps the original Mastodon media URLs.
+
+Mirror existing Mastodon media URLs in already-imported notes:
+
+```sh
+cargo run --bin mirror_mastodon_media
+```
+
+The migration command is dry-run by default. To upload media and rewrite note files, pass `--write`:
+
+```sh
+cargo run --bin mirror_mastodon_media -- --write
+```
+
 ### Recurring Mastodon sync on Railway
 
 The Docker image includes both binaries:
@@ -83,6 +97,16 @@ Configure the cron service with these variables:
 - `MASTODON_ACCESS_TOKEN`
 - `MASTODON_ACCOUNT_ID`
 - `GITHUB_ACCESS_TOKEN`, a token with permission to push to this repository
+
+Configure these optional variables to mirror new Mastodon media into Backblaze B2 before note files are committed:
+
+- `B2_S3_ENDPOINT`, for example `https://s3.us-west-004.backblazeb2.com`
+- `B2_BUCKET`
+- `B2_REGION`, defaults to `us-west-004`
+- `B2_KEY_ID`
+- `B2_APPLICATION_KEY`
+- `B2_PUBLIC_BASE_URL`, for example a Backblaze public bucket URL or custom CDN domain
+- `B2_KEY_PREFIX`, defaults to `mastodon`
 
 Optional variables:
 
@@ -124,6 +148,13 @@ The Mastodon sync command also reads configuration from environment variables.
 | `MASTODON_ACCESS_TOKEN` | Required | Access token for the Mastodon API. |
 | `MASTODON_ACCOUNT_ID` | Required | Account ID to sync statuses from. |
 | `CONTENT_DIR` | `content` | Directory containing content collections. |
+| `B2_S3_ENDPOINT` | Optional | Backblaze B2 S3-compatible endpoint for media mirroring. |
+| `B2_BUCKET` | Optional | B2 bucket to upload mirrored Mastodon media into. |
+| `B2_REGION` | `us-west-004` | B2 S3 region. |
+| `B2_KEY_ID` | Optional | B2 application key ID. |
+| `B2_APPLICATION_KEY` | Optional | B2 application key secret. |
+| `B2_PUBLIC_BASE_URL` | Optional | Public base URL used in note front matter after uploads. |
+| `B2_KEY_PREFIX` | `mastodon` | Object key prefix for mirrored Mastodon media. |
 
 ## Content
 
