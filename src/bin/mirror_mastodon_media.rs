@@ -166,8 +166,23 @@ fn note_markdown(front_matter: &NoteFrontMatter, body: &str) -> String {
         format!("source: {}", note_source(front_matter)),
         format!("source_id: \"{}\"", yaml_escape(&front_matter.source_id)),
         format!("source_url: \"{}\"", yaml_escape(&front_matter.source_url)),
-        format!("visibility: {}", note_visibility(front_matter)),
     ];
+
+    if let Some(in_reply_to_id) = &front_matter.in_reply_to_id {
+        lines.push(format!(
+            "in_reply_to_id: \"{}\"",
+            yaml_escape(in_reply_to_id)
+        ));
+    }
+
+    if let Some(in_reply_to_account_id) = &front_matter.in_reply_to_account_id {
+        lines.push(format!(
+            "in_reply_to_account_id: \"{}\"",
+            yaml_escape(in_reply_to_account_id)
+        ));
+    }
+
+    lines.push(format!("visibility: {}", note_visibility(front_matter)));
 
     if let Some(media) = &front_matter.media {
         if !media.is_empty() {
@@ -238,6 +253,8 @@ mod tests {
                 source: NoteSource::Mastodon,
                 source_id: "123".to_string(),
                 source_url: "https://example.social/@paul/123".to_string(),
+                in_reply_to_id: None,
+                in_reply_to_account_id: None,
                 visibility: NoteVisibility::Public,
                 media: Some(vec![NoteMedia {
                     url: "https://cdn.example.com/mastodon/123/1.jpg".to_string(),

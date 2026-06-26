@@ -1,7 +1,7 @@
 use chrono::DateTime;
 use gray_matter::{engine::YAML, Matter};
 use serde::{Deserialize, Serialize};
-use std::{fmt, fs, io, path::PathBuf};
+use std::{collections::HashMap, fmt, fs, io, path::PathBuf};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NoteFrontMatter {
@@ -9,6 +9,10 @@ pub struct NoteFrontMatter {
     pub source: NoteSource,
     pub source_id: String,
     pub source_url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_reply_to_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_reply_to_account_id: Option<String>,
     pub visibility: NoteVisibility,
     pub media: Option<Vec<NoteMedia>>,
     pub tags: Option<Vec<String>>,
@@ -51,6 +55,11 @@ pub struct Note {
     pub body: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NoteGroup {
+    pub notes: Vec<Note>,
+}
+
 impl From<Note> for NoteSummary {
     fn from(note: Note) -> Self {
         Self {
@@ -80,6 +89,75 @@ impl NoteIndex {
     pub fn note(&self, slug: &str) -> Option<Note> {
         self.notes.iter().find(|note| note.slug == slug).cloned()
     }
+
+    pub fn note_groups(&self) -> Vec<NoteGroup> {
+        let note_by_source_id: HashMap<&str, &Note> = self
+            .notes
+            .iter()
+            .map(|note| (note.front_matter.source_id.as_str(), note))
+            .collect();
+        let mut grouped_notes: HashMap<String, Vec<Note>> = HashMap::new();
+
+        for note in &self.notes {
+            let root_id = thread_root_id(note, &note_by_source_id);
+            grouped_notes.entry(root_id).or_default().push(note.clone());
+        }
+
+        let mut groups = grouped_notes
+            .into_values()
+            .map(|mut notes| {
+                notes.sort_by(|a, b| {
+                    let a_date = DateTime::parse_from_rfc3339(&a.front_matter.date)
+                        .expect("note date was validated during load");
+                    let b_date = DateTime::parse_from_rfc3339(&b.front_matter.date)
+                        .expect("note date was validated during load");
+
+                    a_date.cmp(&b_date)
+                });
+
+                NoteGroup { notes }
+            })
+            .collect::<Vec<_>>();
+
+        groups.sort_by(|a, b| {
+            let a_date = group_latest_date(a);
+            let b_date = group_latest_date(b);
+
+            b_date.cmp(&a_date)
+        });
+
+        groups
+    }
+}
+
+fn thread_root_id<'a>(note: &'a Note, note_by_source_id: &HashMap<&str, &'a Note>) -> String {
+    let mut current = note;
+    let mut seen = Vec::new();
+
+    while let Some(parent_id) = current.front_matter.in_reply_to_id.as_deref() {
+        if seen.contains(&parent_id) {
+            break;
+        }
+        seen.push(parent_id);
+
+        let Some(parent) = note_by_source_id.get(parent_id).copied() else {
+            break;
+        };
+
+        current = parent;
+    }
+
+    current.front_matter.source_id.clone()
+}
+
+fn group_latest_date(group: &NoteGroup) -> DateTime<chrono::FixedOffset> {
+    let latest = group
+        .notes
+        .last()
+        .expect("note groups always contain at least one note");
+
+    DateTime::parse_from_rfc3339(&latest.front_matter.date)
+        .expect("note date was validated during load")
 }
 
 #[derive(Debug)]
@@ -268,6 +346,37 @@ mod tests {
             notes[0].front_matter.media.as_ref().expect("media exists")[0].alt,
             "Image alt text"
         );
+
+        remove_dir_all(dir).expect("test dir can be removed");
+    }
+
+    #[test]
+    fn groups_thread_replies_with_their_root_note() {
+        let dir = test_content_dir();
+
+        write_note(
+            &dir,
+            "standalone.md",
+            "date: \"2024-01-01T12:00:00Z\"\nsource: mastodon\nsource_id: \"3\"\nsource_url: https://example.com/3\nvisibility: public\n",
+        );
+        write_note(
+            &dir,
+            "root.md",
+            "date: \"2024-01-01T10:00:00Z\"\nsource: mastodon\nsource_id: \"1\"\nsource_url: https://example.com/1\nvisibility: public\n",
+        );
+        write_note(
+            &dir,
+            "reply.md",
+            "date: \"2024-01-01T11:00:00Z\"\nsource: mastodon\nsource_id: \"2\"\nsource_url: https://example.com/2\nin_reply_to_id: \"1\"\nin_reply_to_account_id: \"account\"\nvisibility: public\n",
+        );
+
+        let index = NoteIndex::load(&dir).expect("notes load");
+        let groups = index.note_groups();
+
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].notes[0].slug, "standalone");
+        assert_eq!(groups[1].notes[0].slug, "root");
+        assert_eq!(groups[1].notes[1].slug, "reply");
 
         remove_dir_all(dir).expect("test dir can be removed");
     }

@@ -265,6 +265,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn lists_grouped_note_page_from_content() {
+        let root = test_dir();
+        write_note(
+            &root,
+            "root.md",
+            "date: \"2024-01-01T10:00:00Z\"\nsource: mastodon\nsource_id: \"1\"\nsource_url: https://example.com/1\nvisibility: public\n",
+            "Root body",
+        );
+        write_note(
+            &root,
+            "reply.md",
+            "date: \"2024-01-01T11:00:00Z\"\nsource: mastodon\nsource_id: \"2\"\nsource_url: https://example.com/2\nin_reply_to_id: \"1\"\nin_reply_to_account_id: \"account\"\nvisibility: public\n",
+            "Reply body",
+        );
+
+        let (status, json) = get_json(app(&root), "/notes/page?limit=25").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json["items"].as_array().expect("items is array").len(), 1);
+        assert_eq!(
+            json["items"][0]["notes"]
+                .as_array()
+                .expect("notes is array")
+                .len(),
+            2
+        );
+        assert_eq!(json["items"][0]["notes"][0]["slug"], "root");
+        assert_eq!(json["items"][0]["notes"][1]["slug"], "reply");
+
+        remove_dir_all(root).expect("test dir can be removed");
+    }
+
+    #[tokio::test]
     async fn gets_note_by_slug() {
         let root = test_dir();
         write_post(

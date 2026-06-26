@@ -1,11 +1,15 @@
 use chrono::{DateTime, Utc};
 use content_paulmcbride_com::{
-    content::note::NoteIndex,
+    content::note::{Note, NoteIndex, NoteSource},
     media_mirror::{MediaMirror, MediaMirrorConfig},
 };
 use eyre::WrapErr;
 use serde::Deserialize;
-use std::{collections::HashSet, env, fmt, fs, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    env, fmt, fs,
+    path::PathBuf,
+};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -19,6 +23,13 @@ async fn main() -> eyre::Result<()> {
         .wrap_err("failed to verify Mastodon account config")?;
     let existing_notes =
         NoteIndex::load(&config.content_dir).wrap_err("failed to load existing notes")?;
+    let existing_note_by_source_id: HashMap<String, Note> = existing_notes
+        .notes()
+        .into_iter()
+        .filter_map(|summary| existing_notes.note(&summary.slug))
+        .filter(|note| matches!(note.front_matter.source, NoteSource::Mastodon))
+        .map(|note| (note.front_matter.source_id.clone(), note))
+        .collect();
     let existing_source_ids: HashSet<String> = existing_notes
         .notes()
         .into_iter()
@@ -64,12 +75,46 @@ async fn main() -> eyre::Result<()> {
         }
 
         if existing_source_ids.contains(&status.id) {
-            summary.skipped_existing += 1;
-            tracing::info!(
-                source_id = %status.id,
-                reason = "already_imported",
-                "skipped mastodon status"
-            );
+            if write_files && full_sync {
+                let Some(existing_note) = existing_note_by_source_id.get(&status.id) else {
+                    summary.skipped_existing += 1;
+                    continue;
+                };
+                let mut note = MastodonNote::from_status(status)
+                    .wrap_err("failed to build note from status")?;
+                note.body = existing_note.body.clone();
+                note.media = existing_note
+                    .front_matter
+                    .media
+                    .clone()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|media| MastodonNoteMedia {
+                        url: media.url,
+                        alt: media.alt,
+                    })
+                    .collect();
+                let note_path = config
+                    .notes_dir()
+                    .join(format!("{}.md", existing_note.slug));
+
+                fs::write(&note_path, note.to_markdown()).wrap_err_with(|| {
+                    format!("failed to update note file {}", note_path.display())
+                })?;
+                summary.updated += 1;
+                tracing::info!(
+                    source_id = %note.source_id,
+                    path = %note_path.display(),
+                    "updated mastodon note"
+                );
+            } else {
+                summary.skipped_existing += 1;
+                tracing::info!(
+                    source_id = %status.id,
+                    reason = "already_imported",
+                    "skipped mastodon status"
+                );
+            }
             continue;
         }
 
@@ -105,6 +150,7 @@ async fn main() -> eyre::Result<()> {
     tracing::info!(
         fetched = summary.fetched,
         written = summary.written,
+        updated = summary.updated,
         dry_run = summary.dry_run,
         skipped_existing = summary.skipped_existing,
         skipped_visibility = summary.skipped_visibility,
@@ -128,6 +174,7 @@ fn init_tracing() {
 struct SyncSummary {
     fetched: usize,
     written: usize,
+    updated: usize,
     dry_run: usize,
     skipped_existing: usize,
     skipped_visibility: usize,
@@ -138,6 +185,7 @@ impl SyncSummary {
         Self {
             fetched,
             written: 0,
+            updated: 0,
             dry_run: 0,
             skipped_existing: 0,
             skipped_visibility: 0,
@@ -254,6 +302,8 @@ struct MastodonStatus {
     created_at: String,
     uri: String,
     url: Option<String>,
+    in_reply_to_id: Option<String>,
+    in_reply_to_account_id: Option<String>,
     visibility: String,
     content: String,
     media_attachments: Vec<MastodonMediaAttachment>,
@@ -275,6 +325,8 @@ struct MastodonNote {
     created_at: String,
     source_id: String,
     source_url: String,
+    in_reply_to_id: Option<String>,
+    in_reply_to_account_id: Option<String>,
     visibility: String,
     body: String,
     media: Vec<MastodonNoteMedia>,
@@ -293,6 +345,8 @@ impl MastodonNote {
             created_at: status.created_at,
             source_id: status.id,
             source_url: status.url.unwrap_or(status.uri),
+            in_reply_to_id: status.in_reply_to_id,
+            in_reply_to_account_id: status.in_reply_to_account_id,
             visibility: status.visibility,
             body: html_to_text(&status.content),
             media: status
@@ -313,8 +367,23 @@ impl MastodonNote {
             "source: mastodon".to_string(),
             format!("source_id: \"{}\"", yaml_escape(&self.source_id)),
             format!("source_url: \"{}\"", yaml_escape(&self.source_url)),
-            format!("visibility: {}", self.visibility),
         ];
+
+        if let Some(in_reply_to_id) = &self.in_reply_to_id {
+            front_matter.push(format!(
+                "in_reply_to_id: \"{}\"",
+                yaml_escape(in_reply_to_id)
+            ));
+        }
+
+        if let Some(in_reply_to_account_id) = &self.in_reply_to_account_id {
+            front_matter.push(format!(
+                "in_reply_to_account_id: \"{}\"",
+                yaml_escape(in_reply_to_account_id)
+            ));
+        }
+
+        front_matter.push(format!("visibility: {}", self.visibility));
 
         if !self.media.is_empty() {
             front_matter.push("media:".to_string());
@@ -593,6 +662,8 @@ mod tests {
             created_at: "2026-06-18T20:30:00Z".to_string(),
             uri: "https://example.social/users/paul/statuses/123456789".to_string(),
             url: Some("https://example.social/@paul/123456789".to_string()),
+            in_reply_to_id: Some("123456788".to_string()),
+            in_reply_to_account_id: Some("account".to_string()),
             visibility: "public".to_string(),
             content: "<p>Hello &amp; welcome</p>".to_string(),
             media_attachments: vec![MastodonMediaAttachment {
@@ -608,6 +679,8 @@ mod tests {
         assert!(markdown.contains("source: mastodon"));
         assert!(markdown.contains("source_id: \"123456789\""));
         assert!(markdown.contains("source_url: \"https://example.social/@paul/123456789\""));
+        assert!(markdown.contains("in_reply_to_id: \"123456788\""));
+        assert!(markdown.contains("in_reply_to_account_id: \"account\""));
         assert!(markdown.contains("visibility: public"));
         assert!(markdown.contains("  - url: \"https://cdn.example.social/image.jpg\""));
         assert!(markdown.contains("    alt: \"Alt text\""));
@@ -621,6 +694,8 @@ mod tests {
             created_at: "2026-06-18T20:30:00Z".to_string(),
             uri: "https://example.social/users/paul/statuses/123456789".to_string(),
             url: Some("https://example.social/@paul/123456789".to_string()),
+            in_reply_to_id: None,
+            in_reply_to_account_id: None,
             visibility: "public".to_string(),
             content: "<p>Hello</p>".to_string(),
             media_attachments: vec![MastodonMediaAttachment {
@@ -642,6 +717,8 @@ mod tests {
             created_at: "2026-06-18T20:30:00Z".to_string(),
             uri: "https://example.social/users/paul/statuses/123456789".to_string(),
             url: None,
+            in_reply_to_id: None,
+            in_reply_to_account_id: None,
             visibility: "public".to_string(),
             content: "<p>Hello</p>".to_string(),
             media_attachments: Vec::new(),
@@ -687,6 +764,8 @@ mod tests {
             created_at: "2026-06-18T20:30:00Z".to_string(),
             uri: "https://example.social/users/paul/statuses/123456789".to_string(),
             url: Some("https://example.social/@paul/123456789".to_string()),
+            in_reply_to_id: None,
+            in_reply_to_account_id: None,
             visibility: visibility.to_string(),
             content: "<p>Hello</p>".to_string(),
             media_attachments: Vec::new(),
