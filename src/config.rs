@@ -1,5 +1,53 @@
 use std::{env, fmt, num::ParseIntError, path::PathBuf};
 
+pub fn required_env(name: &'static str) -> Result<String, EnvConfigError> {
+    match env::var(name) {
+        Ok(value) if !value.is_empty() => Ok(value),
+        Ok(_) | Err(env::VarError::NotPresent) => Err(EnvConfigError::MissingEnv { name }),
+        Err(source) => Err(EnvConfigError::ReadEnv { name, source }),
+    }
+}
+
+pub fn optional_env(name: &'static str) -> Result<Option<String>, EnvConfigError> {
+    match env::var(name) {
+        Ok(value) if !value.is_empty() => Ok(Some(value)),
+        Ok(_) | Err(env::VarError::NotPresent) => Ok(None),
+        Err(source) => Err(EnvConfigError::ReadEnv { name, source }),
+    }
+}
+
+pub fn env_or(name: &'static str, default: &str) -> Result<String, EnvConfigError> {
+    optional_env(name).map(|value| value.unwrap_or_else(|| default.to_string()))
+}
+
+#[derive(Debug)]
+pub enum EnvConfigError {
+    MissingEnv {
+        name: &'static str,
+    },
+    ReadEnv {
+        name: &'static str,
+        source: env::VarError,
+    },
+}
+
+impl fmt::Display for EnvConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingEnv { name } => write!(f, "missing {} environment variable", name),
+            Self::ReadEnv { name, source } => {
+                write!(
+                    f,
+                    "failed to read {} environment variable: {}",
+                    name, source
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for EnvConfigError {}
+
 #[derive(Clone, Debug)]
 pub struct AppConfig {
     pub port: u16,
@@ -10,24 +58,14 @@ pub struct AppConfig {
 impl AppConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
         Ok(Self {
-            port: match env::var("PORT") {
-                Ok(value) => value
+            port: match optional_env("PORT").map_err(ConfigError::Env)? {
+                Some(value) => value
                     .parse()
                     .map_err(|source| ConfigError::InvalidPort { value, source })?,
-                Err(env::VarError::NotPresent) => 8000,
-                Err(source) => {
-                    return Err(ConfigError::ReadEnv {
-                        name: "PORT",
-                        source,
-                    })
-                }
+                None => 8000,
             },
-            content_dir: env::var("CONTENT_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("content")),
-            public_dir: env::var("PUBLIC_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("public")),
+            content_dir: PathBuf::from(env_or("CONTENT_DIR", "content").map_err(ConfigError::Env)?),
+            public_dir: PathBuf::from(env_or("PUBLIC_DIR", "public").map_err(ConfigError::Env)?),
         })
     }
 }
@@ -38,10 +76,7 @@ pub enum ConfigError {
         value: String,
         source: ParseIntError,
     },
-    ReadEnv {
-        name: &'static str,
-        source: env::VarError,
-    },
+    Env(EnvConfigError),
 }
 
 impl fmt::Display for ConfigError {
@@ -50,13 +85,7 @@ impl fmt::Display for ConfigError {
             Self::InvalidPort { value, source } => {
                 write!(f, "invalid PORT value '{}': {}", value, source)
             }
-            Self::ReadEnv { name, source } => {
-                write!(
-                    f,
-                    "failed to read {} environment variable: {}",
-                    name, source
-                )
-            }
+            Self::Env(source) => write!(f, "{}", source),
         }
     }
 }
