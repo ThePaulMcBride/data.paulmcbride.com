@@ -1,5 +1,5 @@
 use content_paulmcbride_com::{
-    content::note::{NoteFrontMatter, NoteSource, NoteVisibility},
+    content::note::{note_markdown, NoteFrontMatter},
     media_mirror::{MediaMirror, MediaMirrorConfig, MediaMirrorTargetConfig},
 };
 use eyre::WrapErr;
@@ -159,91 +159,10 @@ fn note_paths(notes_dir: PathBuf) -> io::Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
-fn note_markdown(front_matter: &NoteFrontMatter, body: &str) -> String {
-    let mut lines = vec![
-        "---".to_string(),
-        format!("date: \"{}\"", yaml_escape(&front_matter.date)),
-        format!("source: {}", note_source(front_matter)),
-        format!("source_id: \"{}\"", yaml_escape(&front_matter.source_id)),
-        format!("source_url: \"{}\"", yaml_escape(&front_matter.source_url)),
-    ];
-
-    if let Some(in_reply_to_id) = &front_matter.in_reply_to_id {
-        lines.push(format!(
-            "in_reply_to_id: \"{}\"",
-            yaml_escape(in_reply_to_id)
-        ));
-    }
-
-    if let Some(in_reply_to_account_id) = &front_matter.in_reply_to_account_id {
-        lines.push(format!(
-            "in_reply_to_account_id: \"{}\"",
-            yaml_escape(in_reply_to_account_id)
-        ));
-    }
-
-    lines.push(format!("visibility: {}", note_visibility(front_matter)));
-
-    if let Some(media) = &front_matter.media {
-        if !media.is_empty() {
-            lines.push("media:".to_string());
-            for item in media {
-                lines.push(format!("  - url: \"{}\"", yaml_escape(&item.url)));
-                lines.extend(yaml_string_field("    alt", &item.alt));
-            }
-        }
-    }
-
-    if let Some(tags) = &front_matter.tags {
-        if !tags.is_empty() {
-            lines.push("tags:".to_string());
-            for tag in tags {
-                lines.push(format!("  - \"{}\"", yaml_escape(tag)));
-            }
-        }
-    }
-
-    lines.push("---".to_string());
-    lines.push(String::new());
-    lines.push(body.trim().to_string());
-    lines.push(String::new());
-    lines.join("\n")
-}
-
-fn note_visibility(front_matter: &NoteFrontMatter) -> &'static str {
-    match &front_matter.visibility {
-        NoteVisibility::Public => "public",
-        NoteVisibility::Unlisted => "unlisted",
-        NoteVisibility::Private => "private",
-        NoteVisibility::Direct => "direct",
-    }
-}
-
-fn note_source(front_matter: &NoteFrontMatter) -> &'static str {
-    match &front_matter.source {
-        NoteSource::Manual => "manual",
-        NoteSource::Mastodon => "mastodon",
-    }
-}
-
-fn yaml_escape(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
-fn yaml_string_field(name: &str, value: &str) -> Vec<String> {
-    if value.contains('\n') {
-        let mut lines = vec![format!("{name}: |-")];
-        lines.extend(value.lines().map(|line| format!("      {line}")));
-        lines
-    } else {
-        vec![format!("{name}: \"{}\"", yaml_escape(value))]
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use content_paulmcbride_com::content::note::NoteMedia;
+    use content_paulmcbride_com::content::note::{NoteMedia, NoteSource, NoteVisibility};
 
     #[test]
     fn writes_note_markdown_with_mirrored_media() {
