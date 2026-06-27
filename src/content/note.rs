@@ -60,6 +60,15 @@ pub struct NoteGroup {
     pub notes: Vec<Note>,
 }
 
+#[derive(Debug, Serialize, Clone)]
+pub struct NotePage {
+    pub items: Vec<NoteGroup>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_cursor: Option<String>,
+}
+
 impl From<Note> for NoteSummary {
     fn from(note: Note) -> Self {
         Self {
@@ -134,6 +143,50 @@ impl NoteIndex {
 
         groups
     }
+
+    pub fn note_page(&self, after: Option<&str>, limit: usize) -> NotePage {
+        let groups = self.note_groups();
+        let limit = limit.clamp(1, 100);
+        let cursor_index = after.and_then(|cursor| {
+            groups
+                .iter()
+                .position(|group| group_contains_slug(group, cursor))
+        });
+        let start_index = cursor_index.map(|index| index + 1).unwrap_or(0);
+        let items = groups
+            .iter()
+            .skip(start_index)
+            .take(limit)
+            .cloned()
+            .collect::<Vec<_>>();
+        let next_cursor = if start_index + limit < groups.len() {
+            items.last().and_then(group_cursor)
+        } else {
+            None
+        };
+        let previous_page_start = start_index.saturating_sub(limit);
+        let previous_cursor = if start_index == 0 {
+            None
+        } else if previous_page_start == 0 {
+            Some(String::new())
+        } else {
+            groups.get(previous_page_start - 1).and_then(group_cursor)
+        };
+
+        NotePage {
+            items,
+            next_cursor,
+            previous_cursor,
+        }
+    }
+}
+
+fn group_contains_slug(group: &NoteGroup, slug: &str) -> bool {
+    group.notes.iter().any(|note| note.slug == slug)
+}
+
+fn group_cursor(group: &NoteGroup) -> Option<String> {
+    group.notes.last().map(|note| note.slug.clone())
 }
 
 fn thread_root_id<'a>(note: &'a Note, note_by_source_id: &HashMap<&str, &'a Note>) -> String {
@@ -407,6 +460,41 @@ mod tests {
 
         assert_eq!(group.notes[0].slug, "root");
         assert_eq!(group.notes[1].slug, "reply");
+
+        remove_dir_all(dir).expect("test dir can be removed");
+    }
+
+    #[test]
+    fn pages_note_groups_without_splitting_threads() {
+        let dir = test_content_dir();
+
+        write_note(
+            &dir,
+            "newer.md",
+            "date: \"2024-01-01T12:00:00Z\"\nsource: mastodon\nsource_id: \"3\"\nsource_url: https://example.com/3\nvisibility: public\n",
+        );
+        write_note(
+            &dir,
+            "root.md",
+            "date: \"2024-01-01T10:00:00Z\"\nsource: mastodon\nsource_id: \"1\"\nsource_url: https://example.com/1\nvisibility: public\n",
+        );
+        write_note(
+            &dir,
+            "reply.md",
+            "date: \"2024-01-01T11:00:00Z\"\nsource: mastodon\nsource_id: \"2\"\nsource_url: https://example.com/2\nin_reply_to_id: \"1\"\nin_reply_to_account_id: \"account\"\nvisibility: public\n",
+        );
+
+        let index = NoteIndex::load(&dir).expect("notes load");
+        let first_page = index.note_page(None, 1);
+        let second_page = index.note_page(first_page.next_cursor.as_deref(), 1);
+
+        assert_eq!(first_page.items.len(), 1);
+        assert_eq!(first_page.items[0].notes[0].slug, "newer");
+        assert_eq!(first_page.next_cursor.as_deref(), Some("newer"));
+        assert_eq!(second_page.items.len(), 1);
+        assert_eq!(second_page.items[0].notes[0].slug, "root");
+        assert_eq!(second_page.items[0].notes[1].slug, "reply");
+        assert_eq!(second_page.previous_cursor.as_deref(), Some(""));
 
         remove_dir_all(dir).expect("test dir can be removed");
     }
