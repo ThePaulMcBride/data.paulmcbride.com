@@ -2,6 +2,8 @@ use gray_matter::{engine::YAML, Matter};
 use serde::{Deserialize, Serialize};
 use std::{fmt, fs, io, path::PathBuf};
 
+use super::markdown::markdown_files;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Page {
     pub slug: String,
@@ -67,27 +69,16 @@ impl FilesystemPageAdapter {
 
     fn load(&self) -> Result<Vec<Page>, PageLoadError> {
         let matter = Matter::<YAML>::new();
-        let entries = match fs::read_dir(&self.pages_dir) {
-            Ok(entries) => entries,
-            Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(source) => {
-                return Err(PageLoadError::ReadDirectory {
-                    path: self.pages_dir.clone(),
-                    source,
-                })
+        let paths = markdown_files(&self.pages_dir, true).map_err(|source| {
+            PageLoadError::ReadDirectory {
+                path: self.pages_dir.clone(),
+                source,
             }
-        };
+        })?;
 
-        entries
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| {
-                entry
-                    .path()
-                    .extension()
-                    .is_some_and(|ext| ext == "mdx" || ext == "md")
-            })
-            .map(|file| {
-                let path = file.path();
+        paths
+            .into_iter()
+            .map(|path| {
                 let content =
                     fs::read_to_string(&path).map_err(|source| PageLoadError::ReadFile {
                         path: path.clone(),

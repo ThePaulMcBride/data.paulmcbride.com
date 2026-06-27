@@ -3,6 +3,8 @@ use gray_matter::{engine::YAML, Matter};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt, fs, io, path::PathBuf};
 
+use super::markdown::markdown_files;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NoteFrontMatter {
     pub date: String,
@@ -353,27 +355,16 @@ impl FilesystemNoteAdapter {
 
     fn load(&self) -> Result<Vec<Note>, NoteLoadError> {
         let matter = Matter::<YAML>::new();
-        let entries = match fs::read_dir(&self.notes_dir) {
-            Ok(entries) => entries,
-            Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(source) => {
-                return Err(NoteLoadError::ReadDirectory {
-                    path: self.notes_dir.clone(),
-                    source,
-                })
+        let paths = markdown_files(&self.notes_dir, true).map_err(|source| {
+            NoteLoadError::ReadDirectory {
+                path: self.notes_dir.clone(),
+                source,
             }
-        };
+        })?;
 
-        let mut notes = entries
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| {
-                entry
-                    .path()
-                    .extension()
-                    .is_some_and(|ext| ext == "mdx" || ext == "md")
-            })
-            .map(|file| {
-                let path = file.path();
+        let mut notes = paths
+            .into_iter()
+            .map(|path| {
                 let content =
                     fs::read_to_string(&path).map_err(|source| NoteLoadError::ReadFile {
                         path: path.clone(),

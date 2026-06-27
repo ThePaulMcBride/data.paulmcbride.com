@@ -3,6 +3,8 @@ use gray_matter::{engine::YAML, Matter};
 use serde::{Deserialize, Serialize};
 use std::{fmt, fs, io, path::PathBuf};
 
+use super::markdown::markdown_files;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PostFrontMatter {
     pub date: String,
@@ -121,22 +123,16 @@ impl FilesystemPostAdapter {
 
     fn load(&self) -> Result<Vec<Post>, PostLoadError> {
         let matter = Matter::<YAML>::new();
-        let entries =
-            fs::read_dir(&self.posts_dir).map_err(|source| PostLoadError::ReadDirectory {
+        let paths = markdown_files(&self.posts_dir, false).map_err(|source| {
+            PostLoadError::ReadDirectory {
                 path: self.posts_dir.clone(),
                 source,
-            })?;
+            }
+        })?;
 
-        let mut posts = entries
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| {
-                entry
-                    .path()
-                    .extension()
-                    .is_some_and(|ext| ext == "mdx" || ext == "md")
-            })
-            .map(|file| {
-                let path = file.path();
+        let mut posts = paths
+            .into_iter()
+            .map(|path| {
                 let content =
                     fs::read_to_string(&path).map_err(|source| PostLoadError::ReadFile {
                         path: path.clone(),
