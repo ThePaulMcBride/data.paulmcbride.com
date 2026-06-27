@@ -12,7 +12,12 @@ use tracing::Level;
 
 use crate::{
     config::AppConfig,
-    content::{note::NoteIndex, now::NowIndex, page::PageIndex, post::PostIndex},
+    content::{
+        note::{NoteGroup, NoteIndex, NotePage, NoteSummary},
+        now::{NowEntry, NowIndex},
+        page::{Page, PageIndex},
+        post::{Post, PostIndex, PostSummary},
+    },
 };
 
 mod health_check_routes;
@@ -27,6 +32,40 @@ pub struct AppState {
     pub note_index: NoteIndex,
     pub page_index: PageIndex,
     pub now_index: NowIndex,
+}
+
+impl AppState {
+    fn posts(&self) -> Vec<PostSummary> {
+        self.post_index.posts()
+    }
+
+    fn post(&self, slug: &str) -> Option<Post> {
+        self.post_index.post(slug)
+    }
+
+    fn notes(&self) -> Vec<NoteSummary> {
+        self.note_index.notes()
+    }
+
+    fn note_page(&self, after: Option<&str>, limit: usize) -> NotePage {
+        self.note_index.note_page(after, limit)
+    }
+
+    fn note_group(&self, slug: &str) -> Option<NoteGroup> {
+        self.note_index.note_group(slug)
+    }
+
+    fn page(&self, slug: &str) -> Option<Page> {
+        self.page_index.page(slug)
+    }
+
+    fn now_entries(&self) -> Vec<NowEntry> {
+        self.now_index.entries()
+    }
+
+    fn now_entry(&self, slug: &str) -> Option<NowEntry> {
+        self.now_index.entry(slug)
+    }
 }
 
 enum ApiResponse<T: Serialize> {
