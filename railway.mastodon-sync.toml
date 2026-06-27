@@ -1,6 +1,10 @@
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile.sync"
+watchPatterns = [
+  "**",
+  "!content/**",
+]
 
 [deploy]
 startCommand = "sync-mastodon-and-push"
