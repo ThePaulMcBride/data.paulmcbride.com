@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use content_paulmcbride_com::{
-    content::note::{Note, NoteIndex, NoteSource},
+    content::note::{
+        note_markdown, Note, NoteFrontMatter, NoteIndex, NoteMedia, NoteSource, NoteVisibility,
+    },
     media_mirror::{MediaMirror, MediaMirrorConfig},
 };
 use eyre::WrapErr;
@@ -361,44 +363,27 @@ impl MastodonNote {
     }
 
     fn to_markdown(&self) -> String {
-        let mut front_matter = vec![
-            "---".to_string(),
-            format!("date: \"{}\"", yaml_escape(&self.created_at)),
-            "source: mastodon".to_string(),
-            format!("source_id: \"{}\"", yaml_escape(&self.source_id)),
-            format!("source_url: \"{}\"", yaml_escape(&self.source_url)),
-        ];
+        let front_matter = NoteFrontMatter {
+            date: self.created_at.clone(),
+            source: NoteSource::Mastodon,
+            source_id: self.source_id.clone(),
+            source_url: self.source_url.clone(),
+            in_reply_to_id: self.in_reply_to_id.clone(),
+            in_reply_to_account_id: self.in_reply_to_account_id.clone(),
+            visibility: note_visibility(&self.visibility),
+            media: (!self.media.is_empty()).then(|| {
+                self.media
+                    .iter()
+                    .map(|media| NoteMedia {
+                        url: media.url.clone(),
+                        alt: media.alt.clone(),
+                    })
+                    .collect()
+            }),
+            tags: None,
+        };
 
-        if let Some(in_reply_to_id) = &self.in_reply_to_id {
-            front_matter.push(format!(
-                "in_reply_to_id: \"{}\"",
-                yaml_escape(in_reply_to_id)
-            ));
-        }
-
-        if let Some(in_reply_to_account_id) = &self.in_reply_to_account_id {
-            front_matter.push(format!(
-                "in_reply_to_account_id: \"{}\"",
-                yaml_escape(in_reply_to_account_id)
-            ));
-        }
-
-        front_matter.push(format!("visibility: {}", self.visibility));
-
-        if !self.media.is_empty() {
-            front_matter.push("media:".to_string());
-            for media in &self.media {
-                front_matter.push(format!("  - url: \"{}\"", yaml_escape(&media.url)));
-                front_matter.extend(yaml_string_field("    alt", &media.alt));
-            }
-        }
-
-        front_matter.push("---".to_string());
-        front_matter.push(String::new());
-        front_matter.push(self.body.clone());
-        front_matter.push(String::new());
-
-        front_matter.join("\n")
+        note_markdown(&front_matter, &self.body)
     }
 
     async fn mirror_media(&mut self, media_mirror: &MediaMirror) -> eyre::Result<()> {
@@ -411,6 +396,15 @@ impl MastodonNote {
         }
 
         Ok(())
+    }
+}
+
+fn note_visibility(value: &str) -> NoteVisibility {
+    match value {
+        "unlisted" => NoteVisibility::Unlisted,
+        "private" => NoteVisibility::Private,
+        "direct" => NoteVisibility::Direct,
+        _ => NoteVisibility::Public,
     }
 }
 
@@ -555,20 +549,6 @@ fn decode_html_entities(text: &str) -> String {
         .replace("&gt;", ">")
         .replace("&quot;", "\"")
         .replace("&#39;", "'")
-}
-
-fn yaml_escape(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
-fn yaml_string_field(name: &str, value: &str) -> Vec<String> {
-    if value.contains('\n') {
-        let mut lines = vec![format!("{name}: |-")];
-        lines.extend(value.lines().map(|line| format!("      {line}")));
-        lines
-    } else {
-        vec![format!("{name}: \"{}\"", yaml_escape(value))]
-    }
 }
 
 pub fn note_filename(

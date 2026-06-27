@@ -78,6 +78,87 @@ impl From<Note> for NoteSummary {
     }
 }
 
+pub fn note_markdown(front_matter: &NoteFrontMatter, body: &str) -> String {
+    let mut lines = vec![
+        "---".to_string(),
+        format!("date: \"{}\"", yaml_escape(&front_matter.date)),
+        format!("source: {}", note_source(front_matter)),
+        format!("source_id: \"{}\"", yaml_escape(&front_matter.source_id)),
+        format!("source_url: \"{}\"", yaml_escape(&front_matter.source_url)),
+    ];
+
+    if let Some(in_reply_to_id) = &front_matter.in_reply_to_id {
+        lines.push(format!(
+            "in_reply_to_id: \"{}\"",
+            yaml_escape(in_reply_to_id)
+        ));
+    }
+
+    if let Some(in_reply_to_account_id) = &front_matter.in_reply_to_account_id {
+        lines.push(format!(
+            "in_reply_to_account_id: \"{}\"",
+            yaml_escape(in_reply_to_account_id)
+        ));
+    }
+
+    lines.push(format!("visibility: {}", note_visibility(front_matter)));
+
+    if let Some(media) = &front_matter.media {
+        if !media.is_empty() {
+            lines.push("media:".to_string());
+            for item in media {
+                lines.push(format!("  - url: \"{}\"", yaml_escape(&item.url)));
+                lines.extend(yaml_string_field("    alt", &item.alt));
+            }
+        }
+    }
+
+    if let Some(tags) = &front_matter.tags {
+        if !tags.is_empty() {
+            lines.push("tags:".to_string());
+            for tag in tags {
+                lines.push(format!("  - \"{}\"", yaml_escape(tag)));
+            }
+        }
+    }
+
+    lines.push("---".to_string());
+    lines.push(String::new());
+    lines.push(body.trim().to_string());
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+fn note_source(front_matter: &NoteFrontMatter) -> &'static str {
+    match &front_matter.source {
+        NoteSource::Manual => "manual",
+        NoteSource::Mastodon => "mastodon",
+    }
+}
+
+fn note_visibility(front_matter: &NoteFrontMatter) -> &'static str {
+    match &front_matter.visibility {
+        NoteVisibility::Public => "public",
+        NoteVisibility::Unlisted => "unlisted",
+        NoteVisibility::Private => "private",
+        NoteVisibility::Direct => "direct",
+    }
+}
+
+fn yaml_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn yaml_string_field(name: &str, value: &str) -> Vec<String> {
+    if value.contains('\n') {
+        let mut lines = vec![format!("{name}: |-")];
+        lines.extend(value.lines().map(|line| format!("      {line}")));
+        lines
+    } else {
+        vec![format!("{name}: \"{}\"", yaml_escape(value))]
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct NoteIndex {
     notes: Vec<Note>,
@@ -407,6 +488,29 @@ mod tests {
         );
 
         remove_dir_all(dir).expect("test dir can be removed");
+    }
+
+    #[test]
+    fn serializes_multiline_media_alt_as_yaml_block_scalar() {
+        let markdown = note_markdown(
+            &NoteFrontMatter {
+                date: "2024-01-01T10:00:00Z".to_string(),
+                source: NoteSource::Mastodon,
+                source_id: "1".to_string(),
+                source_url: "https://example.com/1".to_string(),
+                in_reply_to_id: None,
+                in_reply_to_account_id: None,
+                visibility: NoteVisibility::Public,
+                media: Some(vec![NoteMedia {
+                    url: "https://example.com/image.jpg".to_string(),
+                    alt: "First line\nSecond line".to_string(),
+                }]),
+                tags: None,
+            },
+            "Body",
+        );
+
+        assert!(markdown.contains("    alt: |-\n      First line\n      Second line"));
     }
 
     #[test]
