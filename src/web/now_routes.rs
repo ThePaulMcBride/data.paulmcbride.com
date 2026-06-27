@@ -23,7 +23,7 @@ pub(super) struct NowEntriesResponse {
 
 pub async fn list_now_entries(State(state): State<AppState>) -> ApiResponse<NowEntriesResponse> {
     ApiResponse::JsonData(NowEntriesResponse {
-        entries: state.now_index.entries(),
+        entries: state.now_entries(),
     })
 }
 
@@ -31,7 +31,7 @@ async fn get_now_entry(
     State(state): State<AppState>,
     Path(slug): Path<String>,
 ) -> ApiResponse<NowEntry> {
-    match state.now_index.entry(&slug) {
+    match state.now_entry(&slug) {
         Some(entry) => ApiResponse::JsonData(entry),
         None => ApiResponse::NotFound,
     }

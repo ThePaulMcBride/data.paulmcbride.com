@@ -15,7 +15,7 @@ pub fn router() -> Router<AppState> {
 }
 
 async fn get_page(State(state): State<AppState>, Path(slug): Path<String>) -> ApiResponse<Page> {
-    match state.page_index.page(&slug) {
+    match state.page(&slug) {
         Some(page) => ApiResponse::JsonData(page),
         None => ApiResponse::NotFound,
     }

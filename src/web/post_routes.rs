@@ -22,13 +22,13 @@ pub(super) struct PostsResponse {
 }
 
 pub async fn list_posts(State(state): State<AppState>) -> ApiResponse<PostsResponse> {
-    let posts: Vec<PostSummary> = state.post_index.posts();
+    let posts: Vec<PostSummary> = state.posts();
 
     ApiResponse::JsonData(PostsResponse { posts })
 }
 
 async fn get_post(State(state): State<AppState>, Path(slug): Path<String>) -> ApiResponse<Post> {
-    let post_option = state.post_index.post(&slug);
+    let post_option = state.post(&slug);
 
     match post_option {
         Some(post) => ApiResponse::JsonData(post),

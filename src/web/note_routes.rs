@@ -26,7 +26,7 @@ pub(super) struct NotesResponse {
 }
 
 pub async fn list_notes(State(state): State<AppState>) -> ApiResponse<NotesResponse> {
-    let notes: Vec<NoteSummary> = state.note_index.notes();
+    let notes: Vec<NoteSummary> = state.notes();
 
     ApiResponse::JsonData(NotesResponse { notes })
 }
@@ -43,14 +43,14 @@ pub async fn list_note_page(
 ) -> ApiResponse<NotePage> {
     let limit = query.limit.unwrap_or(25).clamp(1, 100);
 
-    ApiResponse::JsonData(state.note_index.note_page(query.after.as_deref(), limit))
+    ApiResponse::JsonData(state.note_page(query.after.as_deref(), limit))
 }
 
 async fn get_note(
     State(state): State<AppState>,
     Path(slug): Path<String>,
 ) -> ApiResponse<NoteGroup> {
-    let group_option = state.note_index.note_group(&slug);
+    let group_option = state.note_group(&slug);
 
     match group_option {
         Some(group) => ApiResponse::JsonData(group),
