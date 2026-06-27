@@ -3,6 +3,7 @@ use content_paulmcbride_com::{
     content::note::{
         note_markdown, Note, NoteFrontMatter, NoteIndex, NoteMedia, NoteSource, NoteVisibility,
     },
+    mastodon_sync::{SyncMode, SyncSummary},
     media_mirror::{MediaMirror, MediaMirrorConfig},
 };
 use eyre::WrapErr;
@@ -39,6 +40,7 @@ async fn main() -> eyre::Result<()> {
         .collect();
     let write_files = env::args().any(|arg| arg == "--write");
     let full_sync = env::args().any(|arg| arg == "--full");
+    let sync_mode = SyncMode::new(write_files, full_sync);
     let statuses = fetch_statuses(&config, &existing_source_ids, full_sync)
         .await
         .wrap_err("failed to fetch Mastodon statuses")?;
@@ -59,7 +61,7 @@ async fn main() -> eyre::Result<()> {
         display_name = %account.display_name,
         base_url = %config.base_url,
         notes_dir = %config.notes_dir().display(),
-        mode = %sync_mode(write_files, full_sync),
+        mode = %sync_mode,
         fetched = summary.fetched,
         "mastodon sync started"
     );
@@ -156,7 +158,7 @@ async fn main() -> eyre::Result<()> {
         dry_run = summary.dry_run,
         skipped_existing = summary.skipped_existing,
         skipped_visibility = summary.skipped_visibility,
-        mode = %sync_mode(write_files, full_sync),
+        mode = %sync_mode,
         "mastodon sync completed"
     );
 
@@ -171,28 +173,6 @@ fn init_tracing() {
         .json()
         .with_env_filter(filter)
         .init();
-}
-
-struct SyncSummary {
-    fetched: usize,
-    written: usize,
-    updated: usize,
-    dry_run: usize,
-    skipped_existing: usize,
-    skipped_visibility: usize,
-}
-
-impl SyncSummary {
-    fn new(fetched: usize) -> Self {
-        Self {
-            fetched,
-            written: 0,
-            updated: 0,
-            dry_run: 0,
-            skipped_existing: 0,
-            skipped_visibility: 0,
-        }
-    }
 }
 
 async fn fetch_account(config: &MastodonSyncConfig) -> Result<MastodonAccount, MastodonApiError> {
@@ -495,15 +475,6 @@ fn required_env(name: &'static str) -> Result<String, MastodonSyncConfigError> {
     }
 }
 
-fn sync_mode(write_files: bool, full_sync: bool) -> &'static str {
-    match (write_files, full_sync) {
-        (true, true) => "write/full",
-        (true, false) => "write/incremental",
-        (false, true) => "dry-run/full",
-        (false, false) => "dry-run/incremental",
-    }
-}
-
 fn note_path(
     config: &MastodonSyncConfig,
     note: &MastodonNote,
@@ -728,14 +699,6 @@ mod tests {
 
         assert!(!private_status.is_importable_visibility());
         assert!(!direct_status.is_importable_visibility());
-    }
-
-    #[test]
-    fn describes_sync_modes() {
-        assert_eq!(sync_mode(false, false), "dry-run/incremental");
-        assert_eq!(sync_mode(true, false), "write/incremental");
-        assert_eq!(sync_mode(false, true), "dry-run/full");
-        assert_eq!(sync_mode(true, true), "write/full");
     }
 
     fn status_with_visibility(visibility: &str) -> MastodonStatus {
