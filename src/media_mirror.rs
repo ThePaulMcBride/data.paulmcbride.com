@@ -5,6 +5,28 @@ use reqwest::Url;
 use sha2::{Digest, Sha256};
 use std::{env, fmt};
 
+#[derive(Debug)]
+pub struct DownloadedMedia {
+    bytes: Vec<u8>,
+    content_type: Option<String>,
+}
+
+#[allow(async_fn_in_trait)]
+pub trait MediaDownloader {
+    async fn download(&self, source_url: &str) -> Result<DownloadedMedia, MediaMirrorError>;
+}
+
+#[allow(async_fn_in_trait)]
+pub trait ObjectStore {
+    async fn put_object(
+        &self,
+        bucket: &str,
+        object_key: &str,
+        bytes: Vec<u8>,
+        content_type: Option<String>,
+    ) -> Result<(), MediaMirrorError>;
+}
+
 #[derive(Clone, Debug)]
 pub struct MediaMirrorConfig {
     endpoint_url: String,
@@ -165,10 +187,10 @@ impl MediaMirrorTargetConfig {
     }
 }
 
-pub struct MediaMirror {
+pub struct MediaMirror<D = ReqwestMediaDownloader, S = S3ObjectStore> {
     config: MediaMirrorConfig,
-    http_client: reqwest::Client,
-    s3_client: Client,
+    downloader: D,
+    object_store: S,
 }
 
 impl MediaMirror {
@@ -190,10 +212,24 @@ impl MediaMirror {
             .force_path_style(true)
             .build();
 
+        Self::with_adapters(
+            config,
+            ReqwestMediaDownloader::new(),
+            S3ObjectStore::new(Client::from_conf(s3_config)),
+        )
+    }
+}
+
+impl<D, S> MediaMirror<D, S>
+where
+    D: MediaDownloader,
+    S: ObjectStore,
+{
+    pub fn with_adapters(config: MediaMirrorConfig, downloader: D, object_store: S) -> Self {
         Self {
             config,
-            http_client: reqwest::Client::new(),
-            s3_client: Client::from_conf(s3_config),
+            downloader,
+            object_store,
         }
     }
 
@@ -220,8 +256,45 @@ impl MediaMirror {
             return Ok(source_url.to_string());
         }
 
+        let downloaded = self.downloader.download(source_url).await?;
+        let object_key = self.config.target.hashed_object_key(
+            source_url,
+            downloaded.content_type.as_deref(),
+            &downloaded.bytes,
+        );
+
+        self.object_store
+            .put_object(
+                &self.config.bucket,
+                &object_key,
+                downloaded.bytes,
+                downloaded.content_type,
+            )
+            .await?;
+
+        Ok(format!(
+            "{}/{}",
+            self.config.target.public_base_url, object_key
+        ))
+    }
+}
+
+pub struct ReqwestMediaDownloader {
+    client: reqwest::Client,
+}
+
+impl ReqwestMediaDownloader {
+    fn new() -> Self {
+        Self {
+            client: reqwest::Client::new(),
+        }
+    }
+}
+
+impl MediaDownloader for ReqwestMediaDownloader {
+    async fn download(&self, source_url: &str) -> Result<DownloadedMedia, MediaMirrorError> {
         let response = self
-            .http_client
+            .client
             .get(source_url)
             .send()
             .await
@@ -236,17 +309,42 @@ impl MediaMirror {
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .map(|value| value.split(';').next().unwrap_or(value).trim().to_string());
-        let bytes = response.bytes().await.map_err(MediaMirrorError::Download)?;
-        let object_key =
-            self.config
-                .target
-                .hashed_object_key(source_url, content_type.as_deref(), &bytes);
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(MediaMirrorError::Download)?
+            .to_vec();
 
+        Ok(DownloadedMedia {
+            bytes,
+            content_type,
+        })
+    }
+}
+
+pub struct S3ObjectStore {
+    client: Client,
+}
+
+impl S3ObjectStore {
+    fn new(client: Client) -> Self {
+        Self { client }
+    }
+}
+
+impl ObjectStore for S3ObjectStore {
+    async fn put_object(
+        &self,
+        bucket: &str,
+        object_key: &str,
+        bytes: Vec<u8>,
+        content_type: Option<String>,
+    ) -> Result<(), MediaMirrorError> {
         let mut request = self
-            .s3_client
+            .client
             .put_object()
-            .bucket(&self.config.bucket)
-            .key(&object_key)
+            .bucket(bucket)
+            .key(object_key)
             .body(ByteStream::from(bytes));
         if let Some(content_type) = content_type {
             request = request.content_type(content_type);
@@ -257,10 +355,7 @@ impl MediaMirror {
             .await
             .map_err(|source| MediaMirrorError::Upload(source.to_string()))?;
 
-        Ok(format!(
-            "{}/{}",
-            self.config.target.public_base_url, object_key
-        ))
+        Ok(())
     }
 }
 
@@ -431,6 +526,7 @@ fn sanitize_key_segment(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     fn config() -> MediaMirrorTargetConfig {
         MediaMirrorTargetConfig {
@@ -509,5 +605,73 @@ mod tests {
             "https://s3.us-west-004.backblazeb2.com/media.paulmcbride.com".to_string(),
         )
         .is_err());
+    }
+
+    struct FakeDownloader;
+
+    impl MediaDownloader for FakeDownloader {
+        async fn download(&self, _source_url: &str) -> Result<DownloadedMedia, MediaMirrorError> {
+            Ok(DownloadedMedia {
+                bytes: b"image bytes".to_vec(),
+                content_type: Some("image/jpeg".to_string()),
+            })
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeObjectStore {
+        uploads: Mutex<Vec<(String, String, Vec<u8>, Option<String>)>>,
+    }
+
+    impl ObjectStore for FakeObjectStore {
+        async fn put_object(
+            &self,
+            bucket: &str,
+            object_key: &str,
+            bytes: Vec<u8>,
+            content_type: Option<String>,
+        ) -> Result<(), MediaMirrorError> {
+            self.uploads.lock().expect("uploads lock").push((
+                bucket.to_string(),
+                object_key.to_string(),
+                bytes,
+                content_type,
+            ));
+
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn mirrors_media_through_adapters() {
+        let config = MediaMirrorConfig {
+            endpoint_url: "https://s3.example.com".to_string(),
+            bucket: "media".to_string(),
+            region: "us-west-004".to_string(),
+            access_key_id: "key".to_string(),
+            secret_access_key: "secret".to_string(),
+            target: config(),
+        };
+        let object_store = FakeObjectStore::default();
+        let mirror = MediaMirror::with_adapters(config, FakeDownloader, object_store);
+
+        let public_url = mirror
+            .mirror("source", 0, "https://example.com/media")
+            .await
+            .expect("media mirrors");
+
+        assert_eq!(
+            public_url,
+            "https://cdn.example.com/mastodon/de7030234493a8bea844dbe1d8676e68a2c1a4b014c721f0425a22b6df66faec.jpg"
+        );
+        let uploads = mirror.object_store.uploads.lock().expect("uploads lock");
+        assert_eq!(uploads.len(), 1);
+        assert_eq!(uploads[0].0, "media");
+        assert_eq!(
+            uploads[0].1,
+            "mastodon/de7030234493a8bea844dbe1d8676e68a2c1a4b014c721f0425a22b6df66faec.jpg"
+        );
+        assert_eq!(uploads[0].2, b"image bytes");
+        assert_eq!(uploads[0].3.as_deref(), Some("image/jpeg"));
     }
 }
