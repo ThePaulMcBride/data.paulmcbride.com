@@ -1,3 +1,4 @@
+pub mod markdown;
 pub mod note;
 pub mod now;
 pub mod page;
