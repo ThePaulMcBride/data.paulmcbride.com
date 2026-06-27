@@ -5,6 +5,8 @@ use reqwest::Url;
 use sha2::{Digest, Sha256};
 use std::{env, fmt};
 
+use crate::config::{env_or, required_env, EnvConfigError};
+
 #[derive(Debug)]
 pub struct DownloadedMedia {
     bytes: Vec<u8>,
@@ -65,7 +67,7 @@ impl MediaMirrorConfig {
         Ok(Self {
             endpoint_url: endpoint_env("B2_S3_ENDPOINT")?,
             bucket: required_env("B2_BUCKET")?,
-            region: env::var("B2_REGION").unwrap_or_else(|_| "us-west-004".to_string()),
+            region: env_or("B2_REGION", "us-west-004")?,
             access_key_id: required_env("B2_KEY_ID")?,
             secret_access_key: required_env("B2_APPLICATION_KEY")?,
             target: MediaMirrorTargetConfig::from_env()?,
@@ -92,7 +94,7 @@ impl MediaMirrorTargetConfig {
             public_base_url: required_env("B2_PUBLIC_BASE_URL")?
                 .trim_end_matches('/')
                 .to_string(),
-            key_prefix: env::var("B2_KEY_PREFIX").unwrap_or_else(|_| "mastodon".to_string()),
+            key_prefix: env_or("B2_KEY_PREFIX", "mastodon")?,
         })
     }
 
@@ -401,6 +403,15 @@ impl fmt::Display for MediaMirrorConfigError {
 
 impl std::error::Error for MediaMirrorConfigError {}
 
+impl From<EnvConfigError> for MediaMirrorConfigError {
+    fn from(source: EnvConfigError) -> Self {
+        match source {
+            EnvConfigError::MissingEnv { name } => Self::MissingEnv { name },
+            EnvConfigError::ReadEnv { name, source } => Self::ReadEnv { name, source },
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum MediaMirrorError {
     Download(reqwest::Error),
@@ -421,14 +432,6 @@ impl fmt::Display for MediaMirrorError {
 }
 
 impl std::error::Error for MediaMirrorError {}
-
-fn required_env(name: &'static str) -> Result<String, MediaMirrorConfigError> {
-    match env::var(name) {
-        Ok(value) if !value.is_empty() => Ok(value),
-        Ok(_) | Err(env::VarError::NotPresent) => Err(MediaMirrorConfigError::MissingEnv { name }),
-        Err(source) => Err(MediaMirrorConfigError::ReadEnv { name, source }),
-    }
-}
 
 fn endpoint_env(name: &'static str) -> Result<String, MediaMirrorConfigError> {
     let value = required_env(name)?;
