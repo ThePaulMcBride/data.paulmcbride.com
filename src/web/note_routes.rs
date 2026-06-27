@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tower_http::compression::CompressionLayer;
 
 use super::{ApiResponse, AppState};
-use crate::content::note::{Note, NoteGroup, NoteSummary};
+use crate::content::note::{NoteGroup, NoteSummary};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -94,11 +94,14 @@ fn group_cursor(group: &NoteGroup) -> Option<String> {
     group.notes.last().map(|note| note.slug.clone())
 }
 
-async fn get_note(State(state): State<AppState>, Path(slug): Path<String>) -> ApiResponse<Note> {
-    let note_option = state.note_index.note(&slug);
+async fn get_note(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> ApiResponse<NoteGroup> {
+    let group_option = state.note_index.note_group(&slug);
 
-    match note_option {
-        Some(note) => ApiResponse::JsonData(note),
+    match group_option {
+        Some(group) => ApiResponse::JsonData(group),
         None => ApiResponse::NotFound,
     }
 }
